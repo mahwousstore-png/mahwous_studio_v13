@@ -49,9 +49,9 @@ def _get_secrets() -> dict:
 GEMINI_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_VISION    = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
 GEMINI_TEXT      = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
-GEMINI_IMAGEN    = f"{GEMINI_BASE}/imagen-3.0-generate-002:predict"
+# ✅ FIXED: النماذج الصحيحة المتاحة عبر v1beta
+GEMINI_IMAGEN      = f"{GEMINI_BASE}/imagen-3.0-generate-001:predict"
 GEMINI_IMAGEN_FAST = f"{GEMINI_BASE}/imagen-3.0-fast-generate-001:predict"
-
 OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
 
@@ -267,7 +267,8 @@ def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1",
         return None
 
     ar = ASPECT_RATIO_MAP.get(aspect_ratio, "1:1")
-    endpoint = GEMINI_IMAGEN_FAST if fast_mode else GEMINI_IMAGEN
+    # نستخدم دائماً imagen-3.0-generate-001 فقط (النموذج المتاح عبر v1beta)
+    endpoint = GEMINI_IMAGEN
     headers = {"Content-Type": "application/json", "x-goog-api-key": secrets["gemini"]}
 
     payload = {
@@ -278,7 +279,6 @@ def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1",
             "safetyFilterLevel": "block_only_high",
             "personGeneration": "allow_adult",
             "addWatermark": False,
-            "enhancePrompt": True,
         }
     }
 
@@ -290,20 +290,39 @@ def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1",
                 b64 = preds[0].get("bytesBase64Encoded", "")
                 if b64:
                     return base64.b64decode(b64)
+            return None
+        elif r.status_code == 404:
+            raise Exception(
+                "🔴 Imagen 404: نموذج Imagen غير متاح لهذا المفتاح\n"
+                "حل: افتح Google AI Studio → تأكد من تفعيل Imagen API\n"
+                "رابط: https://aistudio.google.com/apikey"
+            )
         elif r.status_code == 429:
             time.sleep(8)
-            raise Exception("Rate limit - retrying")
+            raise Exception("⏳ تجاوزت حد Imagen — يُعاد المحاولة")
         elif r.status_code == 400:
-            err = r.json().get("error", {}).get("message", "")
-            raise Exception(f"Imagen 400: {err}")
+            try:
+                err = r.json().get("error", {}).get("message", r.text[:200])
+            except:
+                err = r.text[:200]
+            raise Exception(f"🔴 Imagen 400: {err}")
+        elif r.status_code == 403:
+            raise Exception(
+                "🔴 Imagen 403: المفتاح ليس لديه صلاحية Imagen\n"
+                "حل: فعّل Imagen API في: https://aistudio.google.com/apikey"
+            )
         else:
-            raise Exception(f"Imagen error {r.status_code}: {r.text[:200]}")
+            try:
+                err = r.json().get("error", {}).get("message", r.text[:200])
+            except:
+                err = r.text[:200]
+            raise Exception(f"Imagen خطأ {r.status_code}: {err}")
         return None
 
     try:
-        return with_retry(do_request, max_attempts=3, delay=4.0)
+        return with_retry(do_request, max_attempts=2, delay=3.0)
     except Exception as e:
-        st.warning(f"⚠️ تعذّر توليد الصورة: {e}")
+        st.error(f"❌ توليد الصورة فشل: {e}")
         return None
 
 
@@ -357,8 +376,26 @@ def generate_video_luma(
                 "video_url": data.get("assets", {}).get("video", ""),
                 "error": None
             }
+        elif r.status_code == 400:
+            try:
+                detail = r.json().get("detail", r.text[:300])
+            except:
+                detail = r.text[:300]
+            # رصيد غير كافٍ
+            if "credits" in str(detail).lower() or "credit" in str(detail).lower():
+                return {"error": "🔴 رصيد Luma نفد — اشحن حسابك عبر lumalabs.ai/dream-machine"}
+            return {"error": f"Luma 400: {detail}"}
+        elif r.status_code == 401:
+            return {"error": "🔴 LUMA_API_KEY غير صحيح — تحقق منه في الإعدادات"}
+        elif r.status_code == 402:
+            return {"error": "🔴 رصيد Luma نفد — اشحن حسابك عبر lumalabs.ai/dream-machine"}
+        elif r.status_code == 429:
+            return {"error": "⏳ تجاوزت حد Luma — انتظر دقيقة ثم حاول مجدداً"}
         else:
-            err = r.json().get("detail", r.text[:200])
+            try:
+                err = r.json().get("detail", r.text[:200])
+            except:
+                err = r.text[:200]
             return {"error": f"Luma API خطأ {r.status_code}: {err}"}
     except Exception as e:
         return {"error": f"خطأ في الاتصال بـ Luma: {e}"}

@@ -25,120 +25,192 @@ from modules.ai_engine import (
 # ─── Studio CSS ────────────────────────────────────────────────────────────────
 STUDIO_CSS = """
 <style>
+/* ===== STUDIO HERO ===== */
 .studio-hero {
     background: linear-gradient(135deg, #1A0E02 0%, #2A1A06 50%, #1A0E02 100%);
-    border: 2px solid rgba(212,175,55,0.60);
+    border: 2px solid rgba(212,175,55,0.70);
     border-radius: 1.3rem; padding: 2.8rem 2rem; text-align: center;
     margin-bottom: 2rem; position: relative; overflow: hidden;
+    box-shadow: 0 0 40px rgba(212,175,55,0.12), inset 0 1px 0 rgba(255,224,96,0.10);
 }
 .studio-hero::before {
     content: ''; position: absolute; inset: 0;
-    background: radial-gradient(ellipse 80% 55% at 50% 40%, rgba(212,175,55,0.12) 0%, transparent 70%);
+    background: radial-gradient(ellipse 80% 55% at 50% 40%, rgba(212,175,55,0.18) 0%, transparent 70%);
     pointer-events: none;
 }
-.studio-hero h1 { color: #FFE060; font-size: 2.4rem; margin: 0; position: relative; font-weight: 900; }
-.studio-hero .sub { color: #F0C870; margin: 0.5rem 0 0; font-size: 0.95rem; position: relative; font-weight: 700; }
-.studio-hero .version-badge {
-    display: inline-block; background: rgba(212,175,55,0.20); border: 1.5px solid rgba(212,175,55,0.55);
-    color: #FFE060; padding: 0.25rem 1rem; border-radius: 999px; font-size: 0.75rem; font-weight: 900;
-    letter-spacing: 0.08rem; margin-top: 0.8rem; position: relative;
+.studio-hero h1 {
+    color: #FFE878 !important; font-size: 2.4rem; margin: 0; position: relative;
+    font-weight: 900; text-shadow: 0 0 30px rgba(255,220,60,0.40);
 }
+.studio-hero .sub {
+    color: #F5D880 !important; margin: 0.5rem 0 0; font-size: 0.95rem;
+    position: relative; font-weight: 700;
+}
+.studio-hero .version-badge {
+    display: inline-block; background: rgba(212,175,55,0.25);
+    border: 1.5px solid rgba(212,175,55,0.70);
+    color: #FFE878 !important; padding: 0.25rem 1rem; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 900; letter-spacing: 0.08rem;
+    margin-top: 0.8rem; position: relative;
+    text-shadow: 0 0 10px rgba(255,220,60,0.30);
+}
+/* ===== CARDS ===== */
 .mode-card {
-    background: #130D04; border: 2px solid rgba(212,175,55,0.25);
+    background: #160E03; border: 2px solid rgba(212,175,55,0.30);
     border-radius: 1rem; padding: 1.6rem; text-align: center; cursor: pointer;
     transition: all 0.25s; position: relative; overflow: hidden;
 }
 .mode-card:hover, .mode-card.active {
-    border-color: #F0CC55; background: rgba(212,175,55,0.08);
-    box-shadow: 0 0 24px rgba(212,175,55,0.15);
+    border-color: #F0CC55; background: rgba(212,175,55,0.10);
+    box-shadow: 0 0 28px rgba(212,175,55,0.20);
 }
 .analysis-card {
-    background: linear-gradient(135deg, #1E1006, #281808);
-    border: 2px solid rgba(212,175,55,0.50); border-radius: 1rem; padding: 1.4rem;
+    background: linear-gradient(135deg, #1E1006, #2C1A08);
+    border: 2px solid rgba(212,175,55,0.55); border-radius: 1rem; padding: 1.4rem;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.40);
 }
-.analysis-card .brand { color: #FFE060; font-size: 1.5rem; font-weight: 900; }
-.analysis-card .name { color: #FFF0D8; font-size: 1.05rem; font-weight: 800; }
+.analysis-card .brand {
+    color: #FFE878 !important; font-size: 1.5rem; font-weight: 900;
+    text-shadow: 0 0 15px rgba(255,220,60,0.25);
+}
+.analysis-card .name { color: #FFF5E0 !important; font-size: 1.05rem; font-weight: 800; }
 .analysis-card .tag {
-    display: inline-block; background: rgba(212,175,55,0.18);
-    border: 1.5px solid rgba(212,175,55,0.50); color: #FFD840;
+    display: inline-block; background: rgba(212,175,55,0.20);
+    border: 1.5px solid rgba(212,175,55,0.55); color: #FFE060 !important;
     padding: 0.2rem 0.7rem; border-radius: 999px; font-size: 0.78rem; margin: 0.15rem;
     font-weight: 800;
 }
 .result-section {
-    background: #1E1408; border: 1.5px solid rgba(212,175,55,0.35);
+    background: #1E1408; border: 1.5px solid rgba(212,175,55,0.40);
     border-radius: 1rem; padding: 1.6rem; margin-bottom: 1rem;
 }
-.result-section h3 { color: #FFE060; font-size: 1.1rem; margin: 0 0 1rem; font-weight: 900; }
+.result-section h3 { color: #FFE878 !important; font-size: 1.1rem; margin: 0 0 1rem; font-weight: 900; }
+/* ===== CAPTION BLOCK ===== */
 .caption-block {
-    background: #1A1006; border: 1.5px solid rgba(212,175,55,0.30);
+    background: #1C1208; border: 1.5px solid rgba(212,175,55,0.35);
     border-radius: 0.8rem; padding: 1rem; margin-bottom: 0.65rem;
 }
+.caption-block p, .caption-block div, .caption-block span {
+    color: #F0E0C0 !important;
+}
+/* ===== HASHTAG PILLS ===== */
 .hashtag-pill {
-    display: inline-block; background: rgba(212,175,55,0.18);
-    border: 1.5px solid rgba(212,175,55,0.45); color: #FFD040;
+    display: inline-block; background: rgba(212,175,55,0.22);
+    border: 1.5px solid rgba(212,175,55,0.55); color: #FFE060 !important;
     padding: 0.25rem 0.7rem; border-radius: 999px; font-size: 0.78rem; margin: 0.18rem;
-    font-weight: 800;
+    font-weight: 800; text-shadow: none;
 }
+/* ===== SCENE CARD ===== */
 .scene-card {
-    background: #1A1206; border-right: 4px solid #FFD840;
+    background: #1C1408; border-right: 4px solid #FFD840;
     border-radius: 0.6rem; padding: 1rem; margin-bottom: 0.7rem;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.30);
 }
+.scene-card strong { color: #FFE878 !important; }
+.scene-card span { color: #E8D090 !important; }
+/* ===== STEP BADGE ===== */
 .step-badge {
     display: inline-flex; align-items: center; gap: 0.5rem;
-    background: rgba(212,175,55,0.20); border: 2px solid rgba(212,175,55,0.60);
-    color: #FFE060; padding: 0.4rem 1.1rem; border-radius: 999px;
+    background: rgba(212,175,55,0.22); border: 2px solid rgba(212,175,55,0.65);
+    color: #FFE878 !important; padding: 0.4rem 1.1rem; border-radius: 999px;
     font-size: 0.9rem; font-weight: 900; margin-bottom: 0.8rem;
-    letter-spacing: 0.02rem;
+    letter-spacing: 0.02rem; text-shadow: 0 0 8px rgba(255,220,60,0.20);
 }
+/* ===== VIDEO CARD ===== */
 .video-card {
-    background: linear-gradient(135deg, #0D0A1A, #1A1030);
-    border: 2px solid rgba(120,80,220,0.50); border-radius: 1rem;
+    background: linear-gradient(135deg, #0E0B1E, #1C1438);
+    border: 2px solid rgba(140,100,240,0.60); border-radius: 1rem;
     padding: 1.4rem; margin-bottom: 1rem;
+    box-shadow: 0 0 30px rgba(120,80,220,0.12);
 }
-.video-card h3 { color: #C0A0FF; font-size: 1.1rem; margin: 0 0 0.8rem; font-weight: 900; }
+.video-card h3 { color: #D0B0FF !important; font-size: 1.1rem; margin: 0 0 0.8rem; font-weight: 900; }
+.video-card div { color: #C0A8F0 !important; }
+/* ===== VIDEO STATUS ===== */
 .video-status-pending {
-    background: rgba(251,191,36,0.15); border: 1.5px solid #fbbf24;
-    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #FFE070;
+    background: rgba(251,191,36,0.18); border: 1.5px solid #fbbf24;
+    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #FFE878 !important;
     font-size: 0.9rem; font-weight: 800; text-align: center;
 }
 .video-status-done {
-    background: rgba(52,211,153,0.15); border: 1.5px solid #34d399;
-    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #A0FFD8;
+    background: rgba(52,211,153,0.18); border: 1.5px solid #34d399;
+    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #B0FFE0 !important;
     font-size: 0.9rem; font-weight: 800; text-align: center;
 }
 .video-status-error {
-    background: rgba(239,68,68,0.15); border: 1.5px solid #ef4444;
-    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #FFB0B0;
+    background: rgba(239,68,68,0.18); border: 1.5px solid #ef4444;
+    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #FFB8B8 !important;
     font-size: 0.9rem; font-weight: 800; text-align: center;
 }
+/* ===== FLOW PROMPT ===== */
 .flow-prompt {
-    background: #030200; border: 1px solid rgba(100,200,80,0.30);
+    background: #050302; border: 1px solid rgba(120,220,80,0.35);
     border-radius: 0.55rem; padding: 0.8rem; margin-top: 0.5rem;
     font-family: 'Courier New', monospace; font-size: 0.74rem;
-    color: #90D860; line-height: 1.7; direction: ltr; text-align: left;
+    color: #A0E870 !important; line-height: 1.7; direction: ltr; text-align: left;
     white-space: pre-wrap; max-height: 200px; overflow-y: auto;
 }
 .warning-box {
-    background: rgba(251,191,36,0.15); border: 2px solid rgba(251,191,36,0.65);
+    background: rgba(251,191,36,0.18); border: 2px solid rgba(251,191,36,0.75);
     border-radius: 0.7rem; padding: 0.9rem; margin-bottom: 0.6rem;
-    color: #FFE880; font-size: 0.9rem; font-weight: 800;
+    color: #FFF0A0 !important; font-size: 0.9rem; font-weight: 800;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.50);
 }
 .api-badge-ok {
-    display: inline-block; background: rgba(52,211,153,0.15);
-    border: 1.5px solid #34d399; color: #A0FFD8;
+    display: inline-block; background: rgba(52,211,153,0.20);
+    border: 1.5px solid #34d399; color: #C0FFE8 !important;
     padding: 0.2rem 0.8rem; border-radius: 999px; font-size: 0.78rem; font-weight: 800;
 }
 .api-badge-no {
-    display: inline-block; background: rgba(239,68,68,0.15);
-    border: 1.5px solid #ef4444; color: #FFB0B0;
+    display: inline-block; background: rgba(239,68,68,0.20);
+    border: 1.5px solid #ef4444; color: #FFD0D0 !important;
     padding: 0.2rem 0.8rem; border-radius: 999px; font-size: 0.78rem; font-weight: 800;
 }
+/* ===== GENERAL TEXT VISIBILITY ===== */
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] span {
+    color: #E8D8B0 !important;
+}
+[data-testid="stMarkdownContainer"] strong {
+    color: #FFE878 !important;
+}
+[data-testid="stMarkdownContainer"] a {
+    color: #C0A0FF !important;
+}
+/* ===== INFO CARD TEXT ===== */
+.analysis-card > div > div[style*="color:#A09070"],
+.analysis-card > div > div[style*="color:#706040"] {
+    color: #C8B080 !important;
+}
+/* ===== IMAGEN ERROR HELP BOX ===== */
+.imagen-help {
+    background: linear-gradient(135deg, #1A0A00, #260F00);
+    border: 2px solid rgba(255,120,40,0.60); border-radius: 0.8rem;
+    padding: 1.1rem 1.3rem; margin: 0.8rem 0;
+    color: #FFD0A0 !important; font-size: 0.88rem; line-height: 1.9;
+}
+.imagen-help strong { color: #FFB060 !important; }
+.imagen-help a { color: #FFA040 !important; text-decoration: underline; }
+.imagen-help code {
+    background: rgba(255,120,40,0.20); color: #FFD090 !important;
+    padding: 0.1rem 0.4rem; border-radius: 0.3rem; font-size: 0.82rem;
+}
+/* ===== LUMA HELP BOX ===== */
+.luma-help {
+    background: linear-gradient(135deg, #0A0A1A, #0F0F28);
+    border: 2px solid rgba(120,100,255,0.55); border-radius: 0.8rem;
+    padding: 1.1rem 1.3rem; margin: 0.8rem 0;
+    color: #D0C8FF !important; font-size: 0.88rem; line-height: 1.9;
+}
+.luma-help strong { color: #B0A0FF !important; }
+.luma-help a { color: #A090FF !important; text-decoration: underline; }
+/* ===== LOADING BAR ===== */
 @keyframes shimmer {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
 }
 .loading-bar {
-    background: linear-gradient(90deg, #1E1004 25%, #4A2800 50%, #1E1004 75%);
+    background: linear-gradient(90deg, #1E1004 25%, #5A3200 50%, #1E1004 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
     border-radius: 0.3rem; height: 4px; margin: 0.5rem 0;
@@ -210,13 +282,13 @@ def _info_card(info: dict):
             </div>
             <div style="text-align:left; min-width:120px;">
                 <div>{color_dots}</div>
-                <div style="color:#706040; font-size:0.72rem; margin-top:0.4rem;">{conf_str}</div>
+                <div style="color:#C0A060; font-size:0.72rem; margin-top:0.4rem;">{conf_str}</div>
             </div>
         </div>
-        <div style="margin-top:0.75rem; color:#A09070; font-size:0.8rem; line-height:1.5;">
-            <strong style="color:#906030;">الزجاجة:</strong> {info.get('bottle_shape', '—')}<br>
-            <strong style="color:#906030;">المزاج:</strong> {info.get('mood', '—')} · 
-            <strong style="color:#906030;">الملاحظات:</strong> {info.get('notes_guess', '—')}
+        <div style="margin-top:0.75rem; color:#C8B880; font-size:0.8rem; line-height:1.5;">
+            <strong style="color:#FFB060;">الزجاجة:</strong> {info.get('bottle_shape', '—')}<br>
+            <strong style="color:#FFB060;">المزاج:</strong> {info.get('mood', '—')} · 
+            <strong style="color:#FFB060;">الملاحظات:</strong> {info.get('notes_guess', '—')}
         </div>
     </div>
     """, unsafe_allow_html=True)
