@@ -14,6 +14,8 @@ from datetime import datetime
 from PIL import Image
 
 # ─── API Configs ──────────────────────────────────────────────────────────────
+DEFAULT_MAHWOUS_VOICE_ID = "pNInz6obpgnuM0sLNoNo"
+
 def _get_secrets() -> dict:
     """استرجاع مفاتيح API من session_state أو st.secrets (مع تجاهل غياب secrets.toml)"""
     def _s(session_key, secret_key, default=""):
@@ -27,15 +29,16 @@ def _get_secrets() -> dict:
         except Exception:
             return default
     return {
-        "fal":        _s("fal_key",        "FAL_API_KEY"),
-        "luma":       _s("luma_key",       "LUMA_API_KEY"),
-        "openrouter": _s("openrouter_key", "OPENROUTER_API_KEY"),
-        "kling":      _s("kling_key",      "KLING_API_KEY"),
-        "gemini":     _s("gemini_key",     "GEMINI_API_KEY"),
-        "runway":     _s("runway_key",     "RUNWAY_API_KEY"),
-        "webhook":    _s("webhook_url",    "MAKE_WEBHOOK_URL"),
-        "imgbb":      _s("imgbb_key",      "IMGBB_API_KEY"),
-        "elevenlabs": _s("elevenlabs_key", "ELEVENLABS_API_KEY"),
+        "fal":              _s("fal_key",          "FAL_API_KEY"),
+        "luma":             _s("luma_key",         "LUMA_API_KEY"),
+        "openrouter":       _s("openrouter_key",   "OPENROUTER_API_KEY"),
+        "kling":            _s("kling_key",        "KLING_API_KEY"),
+        "gemini":           _s("gemini_key",       "GEMINI_API_KEY"),
+        "runway":           _s("runway_key",       "RUNWAY_API_KEY"),
+        "webhook":          _s("webhook_url",      "MAKE_WEBHOOK_URL"),
+        "imgbb":            _s("imgbb_key",        "IMGBB_API_KEY"),
+        "elevenlabs":       _s("elevenlabs_key",   "ELEVENLABS_API_KEY"),
+        "mahwous_voice_id": _s("mahwous_voice_id", "MAHWOUS_VOICE_ID", DEFAULT_MAHWOUS_VOICE_ID),
     }
 
 
@@ -67,11 +70,12 @@ def upload_image_imgbb(image_bytes: bytes, name: str = "mahwous_image") -> dict:
         return {"success": False, "error": str(e)}
 
 
-def generate_voiceover_elevenlabs(text: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM") -> bytes:
+def generate_voiceover_elevenlabs(text: str, voice_id: str = None) -> bytes:
     """توليد تعليق صوتي باستخدام ElevenLabs TTS"""
     secrets = _get_secrets()
     if not secrets.get("elevenlabs"):
         raise ValueError("ELEVENLABS_API_KEY مفقود — أضفه في إعدادات API")
+    resolved_voice_id = voice_id or secrets.get("mahwous_voice_id") or DEFAULT_MAHWOUS_VOICE_ID
     headers = {
         "xi-api-key": secrets["elevenlabs"],
         "Content-Type": "application/json",
@@ -80,10 +84,10 @@ def generate_voiceover_elevenlabs(text: str, voice_id: str = "21m00Tcm4TlvDq8ikW
     payload = {
         "text": text,
         "model_id": "eleven_multilingual_v2",
-        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.8},
     }
     r = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+        f"https://api.elevenlabs.io/v1/text-to-speech/{resolved_voice_id}",
         headers=headers,
         json=payload,
         timeout=60

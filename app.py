@@ -209,7 +209,7 @@ def render_sidebar():
         # Clear session
         if st.button("🗑️ مسح الجلسة", use_container_width=True, key="clear_session"):
             keys_to_keep = ["current_page", "openrouter_key", "gemini_key", "luma_key", "runway_key",
-                            "webhook_url", "fal_key", "imgbb_key", "elevenlabs_key",
+                            "webhook_url", "fal_key", "imgbb_key", "elevenlabs_key", "mahwous_voice_id",
                             "supabase_url", "supabase_key"]
             for k in list(st.session_state.keys()):
                 if k not in keys_to_keep:
@@ -480,8 +480,15 @@ def show_settings_page():
             placeholder="YOUR_KEY",
             key="elevenlabs_key_input"
         )
+        mahwous_voice_id_input = st.text_input(
+            "MAHWOUS_VOICE_ID",
+            value=st.session_state.get("mahwous_voice_id", ""),
+            placeholder="pNInz6obpgnuM0sLNoNo",
+            key="mahwous_voice_id_input"
+        )
         if st.button("💾 حفظ مفتاح ElevenLabs", use_container_width=True, key="save_elevenlabs"):
             st.session_state.elevenlabs_key = elevenlabs_key
+            st.session_state.mahwous_voice_id = mahwous_voice_id_input
             st.success("✅ تم حفظ مفتاح ElevenLabs!")
 
     # ── Supabase ─────────────────────────────────────────────────────────────
@@ -515,6 +522,7 @@ def show_settings_page():
         st.session_state.fal_key         = st.session_state.get("fal_key_input", "")
         st.session_state.imgbb_key       = st.session_state.get("imgbb_key_input", "")
         st.session_state.elevenlabs_key  = st.session_state.get("elevenlabs_key_input", "")
+        st.session_state.mahwous_voice_id = st.session_state.get("mahwous_voice_id_input", "")
         st.session_state.supabase_url    = st.session_state.get("supabase_url_input", "")
         st.session_state.supabase_key    = st.session_state.get("supabase_key_input", "")
         st.success("✅ تم حفظ جميع الإعدادات بنجاح!")
@@ -539,6 +547,7 @@ RUNWAY_API_KEY = "YOUR_KEY"
 FAL_API_KEY = "YOUR_KEY"
 IMGBB_API_KEY = "YOUR_KEY"
 ELEVENLABS_API_KEY = "YOUR_KEY"
+MAHWOUS_VOICE_ID = "pNInz6obpgnuM0sLNoNo"
 MAKE_WEBHOOK_URL = "YOUR_KEY"
 SUPABASE_URL = "YOUR_KEY"
 SUPABASE_KEY = "YOUR_KEY"
