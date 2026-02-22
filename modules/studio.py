@@ -1237,6 +1237,34 @@ def show_studio_page():
         secrets = _get_secrets()
         has_webhook = bool(secrets.get("webhook"))
 
+        # ── آخر عملية نشر (دائم عبر الجلسة) ───────────────────────
+        last_pub = st.session_state.get("publish_last_result")
+        if last_pub:
+            platforms_str = " · ".join(last_pub.get("platforms", []))
+            if last_pub.get("success"):
+                st.markdown(f"""
+                <div class='video-status-done'>
+                  ✅ <strong>تم النشر بنجاح!</strong><br>
+                  🕐 {last_pub['timestamp']} &nbsp;|&nbsp;
+                  📡 كود الاستجابة: {last_pub.get('status_code', '—')}<br>
+                  🎯 المنصات: {platforms_str or '—'}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class='video-status-error'>
+                  ❌ <strong>فشل النشر</strong><br>
+                  🕐 {last_pub['timestamp']} &nbsp;|&nbsp; {last_pub.get('error', 'خطأ غير معروف')}<br>
+                  🎯 المنصات المحاولة: {platforms_str or '—'}
+                </div>
+                """, unsafe_allow_html=True)
+
+            if st.button("🗑️ مسح سجل النشر", key="clear_publish_log"):
+                st.session_state.pop("publish_last_result", None)
+                st.rerun()
+
+            st.markdown("---")
+
         # ── حالة المحتوى المتاح ──────────────────────────────────
         has_images   = bool(st.session_state.get("generated_images"))
         has_video    = bool(st.session_state.get("video_url_ready"))
@@ -1338,17 +1366,19 @@ def show_studio_page():
                     result = send_to_make(payload)
 
                 if result.get("success"):
-                    st.markdown(f"""
-                    <div class='video-status-done'>
-                      ✅ تم الإرسال بنجاح إلى Make.com!<br>
-                      <small>كود الاستجابة: {result.get('status_code', '—')} |
-                      الرد: {str(result.get('response', '—'))[:100]}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.session_state.publish_last_result = {
+                        "success":    True,
+                        "timestamp":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "platforms":  selected_publish_platforms,
+                        "status_code": result.get("status_code", "—"),
+                        "response":   str(result.get("response", ""))[:200],
+                    }
                     st.session_state.gen_count = st.session_state.get("gen_count", 0) + 1
                 else:
-                    st.markdown(f"""
-                    <div class='video-status-error'>
-                      ❌ فشل الإرسال: {result.get('error', 'خطأ غير معروف')}
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.session_state.publish_last_result = {
+                        "success":   False,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "platforms": selected_publish_platforms,
+                        "error":     result.get("error", "خطأ غير معروف"),
+                    }
+                st.rerun()
