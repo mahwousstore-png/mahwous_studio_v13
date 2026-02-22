@@ -17,200 +17,133 @@ from modules.ai_engine import (
     generate_hashtags, generate_scenario,
     generate_video_luma, check_luma_status, poll_luma_video,
     generate_video_runway, check_runway_status,
-    generate_image_gemini, generate_perfume_story,
+    generate_video_fal, check_fal_video_status,
+    generate_image_gemini, smart_generate_image, generate_perfume_story,
     build_manual_info, build_video_prompt,
-    PLATFORMS, MAHWOUS_OUTFITS, _get_secrets
+    send_to_make, build_make_payload,
+    generate_trend_insights,
+    load_asset_bytes,
+    generate_concurrent_images, generate_voiceover_elevenlabs,
+    PLATFORMS, MAHWOUS_OUTFITS, FAL_VIDEO_MODELS, _get_secrets
 )
 
 # ─── Studio CSS ────────────────────────────────────────────────────────────────
 STUDIO_CSS = """
 <style>
-/* ===== STUDIO HERO ===== */
 .studio-hero {
     background: linear-gradient(135deg, #1A0E02 0%, #2A1A06 50%, #1A0E02 100%);
-    border: 2px solid rgba(212,175,55,0.70);
+    border: 2px solid rgba(212,175,55,0.60);
     border-radius: 1.3rem; padding: 2.8rem 2rem; text-align: center;
     margin-bottom: 2rem; position: relative; overflow: hidden;
-    box-shadow: 0 0 40px rgba(212,175,55,0.12), inset 0 1px 0 rgba(255,224,96,0.10);
 }
 .studio-hero::before {
     content: ''; position: absolute; inset: 0;
-    background: radial-gradient(ellipse 80% 55% at 50% 40%, rgba(212,175,55,0.18) 0%, transparent 70%);
+    background: radial-gradient(ellipse 80% 55% at 50% 40%, rgba(212,175,55,0.12) 0%, transparent 70%);
     pointer-events: none;
 }
-.studio-hero h1 {
-    color: #FFE878 !important; font-size: 2.4rem; margin: 0; position: relative;
-    font-weight: 900; text-shadow: 0 0 30px rgba(255,220,60,0.40);
-}
-.studio-hero .sub {
-    color: #F5D880 !important; margin: 0.5rem 0 0; font-size: 0.95rem;
-    position: relative; font-weight: 700;
-}
+.studio-hero h1 { color: #FFE060; font-size: 2.4rem; margin: 0; position: relative; font-weight: 900; }
+.studio-hero .sub { color: #F0C870; margin: 0.5rem 0 0; font-size: 0.95rem; position: relative; font-weight: 700; }
 .studio-hero .version-badge {
-    display: inline-block; background: rgba(212,175,55,0.25);
-    border: 1.5px solid rgba(212,175,55,0.70);
-    color: #FFE878 !important; padding: 0.25rem 1rem; border-radius: 999px;
-    font-size: 0.75rem; font-weight: 900; letter-spacing: 0.08rem;
-    margin-top: 0.8rem; position: relative;
-    text-shadow: 0 0 10px rgba(255,220,60,0.30);
+    display: inline-block; background: rgba(212,175,55,0.20); border: 1.5px solid rgba(212,175,55,0.55);
+    color: #FFE060; padding: 0.25rem 1rem; border-radius: 999px; font-size: 0.75rem; font-weight: 900;
+    letter-spacing: 0.08rem; margin-top: 0.8rem; position: relative;
 }
-/* ===== CARDS ===== */
 .mode-card {
-    background: #160E03; border: 2px solid rgba(212,175,55,0.30);
+    background: #130D04; border: 2px solid rgba(212,175,55,0.25);
     border-radius: 1rem; padding: 1.6rem; text-align: center; cursor: pointer;
     transition: all 0.25s; position: relative; overflow: hidden;
 }
 .mode-card:hover, .mode-card.active {
-    border-color: #F0CC55; background: rgba(212,175,55,0.10);
-    box-shadow: 0 0 28px rgba(212,175,55,0.20);
+    border-color: #F0CC55; background: rgba(212,175,55,0.08);
+    box-shadow: 0 0 24px rgba(212,175,55,0.15);
 }
 .analysis-card {
-    background: linear-gradient(135deg, #1E1006, #2C1A08);
-    border: 2px solid rgba(212,175,55,0.55); border-radius: 1rem; padding: 1.4rem;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.40);
+    background: linear-gradient(135deg, #1E1006, #281808);
+    border: 2px solid rgba(212,175,55,0.50); border-radius: 1rem; padding: 1.4rem;
 }
-.analysis-card .brand {
-    color: #FFE878 !important; font-size: 1.5rem; font-weight: 900;
-    text-shadow: 0 0 15px rgba(255,220,60,0.25);
-}
-.analysis-card .name { color: #FFF5E0 !important; font-size: 1.05rem; font-weight: 800; }
+.analysis-card .brand { color: #FFE060; font-size: 1.5rem; font-weight: 900; }
+.analysis-card .name { color: #FFF0D8; font-size: 1.05rem; font-weight: 800; }
 .analysis-card .tag {
-    display: inline-block; background: rgba(212,175,55,0.20);
-    border: 1.5px solid rgba(212,175,55,0.55); color: #FFE060 !important;
+    display: inline-block; background: rgba(212,175,55,0.18);
+    border: 1.5px solid rgba(212,175,55,0.50); color: #FFD840;
     padding: 0.2rem 0.7rem; border-radius: 999px; font-size: 0.78rem; margin: 0.15rem;
     font-weight: 800;
 }
 .result-section {
-    background: #1E1408; border: 1.5px solid rgba(212,175,55,0.40);
+    background: #1E1408; border: 1.5px solid rgba(212,175,55,0.35);
     border-radius: 1rem; padding: 1.6rem; margin-bottom: 1rem;
 }
-.result-section h3 { color: #FFE878 !important; font-size: 1.1rem; margin: 0 0 1rem; font-weight: 900; }
-/* ===== CAPTION BLOCK ===== */
+.result-section h3 { color: #FFE060; font-size: 1.1rem; margin: 0 0 1rem; font-weight: 900; }
 .caption-block {
-    background: #1C1208; border: 1.5px solid rgba(212,175,55,0.35);
+    background: #1A1006; border: 1.5px solid rgba(212,175,55,0.30);
     border-radius: 0.8rem; padding: 1rem; margin-bottom: 0.65rem;
 }
-.caption-block p, .caption-block div, .caption-block span {
-    color: #F0E0C0 !important;
-}
-/* ===== HASHTAG PILLS ===== */
 .hashtag-pill {
-    display: inline-block; background: rgba(212,175,55,0.22);
-    border: 1.5px solid rgba(212,175,55,0.55); color: #FFE060 !important;
+    display: inline-block; background: rgba(212,175,55,0.18);
+    border: 1.5px solid rgba(212,175,55,0.45); color: #FFD040;
     padding: 0.25rem 0.7rem; border-radius: 999px; font-size: 0.78rem; margin: 0.18rem;
-    font-weight: 800; text-shadow: none;
+    font-weight: 800;
 }
-/* ===== SCENE CARD ===== */
 .scene-card {
-    background: #1C1408; border-right: 4px solid #FFD840;
+    background: #1A1206; border-right: 4px solid #FFD840;
     border-radius: 0.6rem; padding: 1rem; margin-bottom: 0.7rem;
-    box-shadow: inset 0 0 20px rgba(0,0,0,0.30);
 }
-.scene-card strong { color: #FFE878 !important; }
-.scene-card span { color: #E8D090 !important; }
-/* ===== STEP BADGE ===== */
 .step-badge {
     display: inline-flex; align-items: center; gap: 0.5rem;
-    background: rgba(212,175,55,0.22); border: 2px solid rgba(212,175,55,0.65);
-    color: #FFE878 !important; padding: 0.4rem 1.1rem; border-radius: 999px;
+    background: rgba(212,175,55,0.20); border: 2px solid rgba(212,175,55,0.60);
+    color: #FFE060; padding: 0.4rem 1.1rem; border-radius: 999px;
     font-size: 0.9rem; font-weight: 900; margin-bottom: 0.8rem;
-    letter-spacing: 0.02rem; text-shadow: 0 0 8px rgba(255,220,60,0.20);
+    letter-spacing: 0.02rem;
 }
-/* ===== VIDEO CARD ===== */
 .video-card {
-    background: linear-gradient(135deg, #0E0B1E, #1C1438);
-    border: 2px solid rgba(140,100,240,0.60); border-radius: 1rem;
+    background: linear-gradient(135deg, #0D0A1A, #1A1030);
+    border: 2px solid rgba(120,80,220,0.50); border-radius: 1rem;
     padding: 1.4rem; margin-bottom: 1rem;
-    box-shadow: 0 0 30px rgba(120,80,220,0.12);
 }
-.video-card h3 { color: #D0B0FF !important; font-size: 1.1rem; margin: 0 0 0.8rem; font-weight: 900; }
-.video-card div { color: #C0A8F0 !important; }
-/* ===== VIDEO STATUS ===== */
+.video-card h3 { color: #C0A0FF; font-size: 1.1rem; margin: 0 0 0.8rem; font-weight: 900; }
 .video-status-pending {
-    background: rgba(251,191,36,0.18); border: 1.5px solid #fbbf24;
-    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #FFE878 !important;
+    background: rgba(251,191,36,0.15); border: 1.5px solid #fbbf24;
+    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #FFE070;
     font-size: 0.9rem; font-weight: 800; text-align: center;
 }
 .video-status-done {
-    background: rgba(52,211,153,0.18); border: 1.5px solid #34d399;
-    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #B0FFE0 !important;
+    background: rgba(52,211,153,0.15); border: 1.5px solid #34d399;
+    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #A0FFD8;
     font-size: 0.9rem; font-weight: 800; text-align: center;
 }
 .video-status-error {
-    background: rgba(239,68,68,0.18); border: 1.5px solid #ef4444;
-    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #FFB8B8 !important;
+    background: rgba(239,68,68,0.15); border: 1.5px solid #ef4444;
+    border-radius: 0.65rem; padding: 0.8rem 1rem; color: #FFB0B0;
     font-size: 0.9rem; font-weight: 800; text-align: center;
 }
-/* ===== FLOW PROMPT ===== */
 .flow-prompt {
-    background: #050302; border: 1px solid rgba(120,220,80,0.35);
+    background: #030200; border: 1px solid rgba(100,200,80,0.30);
     border-radius: 0.55rem; padding: 0.8rem; margin-top: 0.5rem;
     font-family: 'Courier New', monospace; font-size: 0.74rem;
-    color: #A0E870 !important; line-height: 1.7; direction: ltr; text-align: left;
+    color: #90D860; line-height: 1.7; direction: ltr; text-align: left;
     white-space: pre-wrap; max-height: 200px; overflow-y: auto;
 }
 .warning-box {
-    background: rgba(251,191,36,0.18); border: 2px solid rgba(251,191,36,0.75);
+    background: rgba(251,191,36,0.15); border: 2px solid rgba(251,191,36,0.65);
     border-radius: 0.7rem; padding: 0.9rem; margin-bottom: 0.6rem;
-    color: #FFF0A0 !important; font-size: 0.9rem; font-weight: 800;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.50);
+    color: #FFE880; font-size: 0.9rem; font-weight: 800;
 }
 .api-badge-ok {
-    display: inline-block; background: rgba(52,211,153,0.20);
-    border: 1.5px solid #34d399; color: #C0FFE8 !important;
+    display: inline-block; background: rgba(52,211,153,0.15);
+    border: 1.5px solid #34d399; color: #A0FFD8;
     padding: 0.2rem 0.8rem; border-radius: 999px; font-size: 0.78rem; font-weight: 800;
 }
 .api-badge-no {
-    display: inline-block; background: rgba(239,68,68,0.20);
-    border: 1.5px solid #ef4444; color: #FFD0D0 !important;
+    display: inline-block; background: rgba(239,68,68,0.15);
+    border: 1.5px solid #ef4444; color: #FFB0B0;
     padding: 0.2rem 0.8rem; border-radius: 999px; font-size: 0.78rem; font-weight: 800;
 }
-/* ===== GENERAL TEXT VISIBILITY ===== */
-[data-testid="stMarkdownContainer"] p,
-[data-testid="stMarkdownContainer"] li,
-[data-testid="stMarkdownContainer"] span {
-    color: #E8D8B0 !important;
-}
-[data-testid="stMarkdownContainer"] strong {
-    color: #FFE878 !important;
-}
-[data-testid="stMarkdownContainer"] a {
-    color: #C0A0FF !important;
-}
-/* ===== INFO CARD TEXT ===== */
-.analysis-card > div > div[style*="color:#A09070"],
-.analysis-card > div > div[style*="color:#706040"] {
-    color: #C8B080 !important;
-}
-/* ===== IMAGEN ERROR HELP BOX ===== */
-.imagen-help {
-    background: linear-gradient(135deg, #1A0A00, #260F00);
-    border: 2px solid rgba(255,120,40,0.60); border-radius: 0.8rem;
-    padding: 1.1rem 1.3rem; margin: 0.8rem 0;
-    color: #FFD0A0 !important; font-size: 0.88rem; line-height: 1.9;
-}
-.imagen-help strong { color: #FFB060 !important; }
-.imagen-help a { color: #FFA040 !important; text-decoration: underline; }
-.imagen-help code {
-    background: rgba(255,120,40,0.20); color: #FFD090 !important;
-    padding: 0.1rem 0.4rem; border-radius: 0.3rem; font-size: 0.82rem;
-}
-/* ===== LUMA HELP BOX ===== */
-.luma-help {
-    background: linear-gradient(135deg, #0A0A1A, #0F0F28);
-    border: 2px solid rgba(120,100,255,0.55); border-radius: 0.8rem;
-    padding: 1.1rem 1.3rem; margin: 0.8rem 0;
-    color: #D0C8FF !important; font-size: 0.88rem; line-height: 1.9;
-}
-.luma-help strong { color: #B0A0FF !important; }
-.luma-help a { color: #A090FF !important; text-decoration: underline; }
-/* ===== LOADING BAR ===== */
 @keyframes shimmer {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
 }
 .loading-bar {
-    background: linear-gradient(90deg, #1E1004 25%, #5A3200 50%, #1E1004 75%);
+    background: linear-gradient(90deg, #1E1004 25%, #4A2800 50%, #1E1004 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
     border-radius: 0.3rem; height: 4px; margin: 0.5rem 0;
@@ -282,13 +215,13 @@ def _info_card(info: dict):
             </div>
             <div style="text-align:left; min-width:120px;">
                 <div>{color_dots}</div>
-                <div style="color:#C0A060; font-size:0.72rem; margin-top:0.4rem;">{conf_str}</div>
+                <div style="color:#706040; font-size:0.72rem; margin-top:0.4rem;">{conf_str}</div>
             </div>
         </div>
-        <div style="margin-top:0.75rem; color:#C8B880; font-size:0.8rem; line-height:1.5;">
-            <strong style="color:#FFB060;">الزجاجة:</strong> {info.get('bottle_shape', '—')}<br>
-            <strong style="color:#FFB060;">المزاج:</strong> {info.get('mood', '—')} · 
-            <strong style="color:#FFB060;">الملاحظات:</strong> {info.get('notes_guess', '—')}
+        <div style="margin-top:0.75rem; color:#A09070; font-size:0.8rem; line-height:1.5;">
+            <strong style="color:#906030;">الزجاجة:</strong> {info.get('bottle_shape', '—')}<br>
+            <strong style="color:#906030;">المزاج:</strong> {info.get('mood', '—')} · 
+            <strong style="color:#906030;">الملاحظات:</strong> {info.get('notes_guess', '—')}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -297,16 +230,9 @@ def _info_card(info: dict):
 # ─── Platform Selector ────────────────────────────────────────────────────────
 def platform_selector() -> list:
     if "selected_platforms" not in st.session_state:
-        st.session_state.selected_platforms = ["instagram_post", "instagram_story", "tiktok", "twitter"]
+        st.session_state.selected_platforms = list(PLATFORMS.keys())
 
-    groups = {
-        "📱 عمودي 9:16 — قصص وريلز": ["instagram_story", "tiktok", "youtube_short", "snapchat"],
-        "🖼️ مربع 1:1 — منشور إنستجرام": ["instagram_post"],
-        "🖥️ أفقي 16:9 — يوتيوب وتويتر": ["twitter", "youtube_thumb", "facebook", "linkedin"],
-        "📌 رأسي 2:3 — بينتريست": ["pinterest"],
-    }
-
-    c1, c2, c3 = st.columns([1, 1, 2])
+    c1, c2 = st.columns(2)
     if c1.button("✅ تحديد الكل", use_container_width=True, key="sel_all"):
         st.session_state.selected_platforms = list(PLATFORMS.keys())
         st.rerun()
@@ -314,24 +240,22 @@ def platform_selector() -> list:
         st.session_state.selected_platforms = []
         st.rerun()
 
-    for group_name, plat_keys in groups.items():
-        st.markdown(f"<div style='color:#706040; font-size:0.73rem; font-weight:700; margin:0.5rem 0 0.2rem;'>{group_name}</div>", unsafe_allow_html=True)
-        cols = st.columns(len(plat_keys))
-        for col, key in zip(cols, plat_keys):
-            plat = PLATFORMS[key]
-            is_sel = key in st.session_state.selected_platforms
-            if col.button(
-                f"{plat['emoji']} {'✓' if is_sel else '○'}",
-                key=f"plat_{key}",
-                help=plat["label"],
-                use_container_width=True,
-                type="primary" if is_sel else "secondary"
-            ):
-                if is_sel:
-                    st.session_state.selected_platforms.remove(key)
-                else:
-                    st.session_state.selected_platforms.append(key)
-                st.rerun()
+    cols = st.columns(len(PLATFORMS))
+    for col, key in zip(cols, PLATFORMS.keys()):
+        plat = PLATFORMS[key]
+        is_sel = key in st.session_state.selected_platforms
+        if col.button(
+            f"{plat['emoji']} {'✓' if is_sel else '○'}",
+            key=f"plat_{key}",
+            help=plat["label"],
+            use_container_width=True,
+            type="primary" if is_sel else "secondary"
+        ):
+            if is_sel:
+                st.session_state.selected_platforms.remove(key)
+            else:
+                st.session_state.selected_platforms.append(key)
+            st.rerun()
 
     return st.session_state.selected_platforms
 
@@ -354,12 +278,12 @@ def _show_how_it_works():
 
 # ─── ✅ تبويب توليد الفيديو المباشر ──────────────────────────────────────────
 def _show_video_generation_tab(perfume_info: dict):
-    """تبويب توليد الفيديو المباشر — Luma + RunwayML"""
+    """تبويب توليد الفيديو المباشر — Luma + RunwayML + Fal.ai"""
     st.markdown("""
     <div class="video-card">
       <h3>🎬 توليد فيديو سينمائي مباشرة</h3>
       <div style='color:#A090D0; font-size:0.85rem;'>
-        Luma Dream Machine · RunwayML Gen-3 — فيديو احترافي في دقائق
+        Luma Dream Machine · RunwayML Gen-3 · Fal.ai (Kling/Veo/SVD) — فيديو احترافي في دقائق
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -367,9 +291,10 @@ def _show_video_generation_tab(perfume_info: dict):
     secrets = _get_secrets()
     has_luma   = bool(secrets["luma"])
     has_runway = bool(secrets["runway"])
+    has_fal    = bool(secrets["fal"])
 
     # حالة المفاتيح
-    col_l, col_r = st.columns(2)
+    col_l, col_r, col_f = st.columns(3)
     with col_l:
         if has_luma:
             st.markdown("<span class='api-badge-ok'>🟢 Luma Dream Machine متصل</span>", unsafe_allow_html=True)
@@ -380,9 +305,14 @@ def _show_video_generation_tab(perfume_info: dict):
             st.markdown("<span class='api-badge-ok'>🟢 RunwayML Gen-3 متصل</span>", unsafe_allow_html=True)
         else:
             st.markdown("<span class='api-badge-no'>🔴 RunwayML — أضف RUNWAY_API_KEY في الإعدادات</span>", unsafe_allow_html=True)
+    with col_f:
+        if has_fal:
+            st.markdown("<span class='api-badge-ok'>🟢 Fal.ai متصل</span>", unsafe_allow_html=True)
+        else:
+            st.markdown("<span class='api-badge-no'>🔴 Fal.ai — أضف FAL_API_KEY في الإعدادات</span>", unsafe_allow_html=True)
 
-    if not has_luma and not has_runway:
-        st.warning("⚠️ أضف مفتاح Luma أو RunwayML في الإعدادات لتفعيل توليد الفيديو")
+    if not has_luma and not has_runway and not has_fal:
+        st.warning("⚠️ أضف مفتاح Luma أو RunwayML أو FAL في الإعدادات لتفعيل توليد الفيديو")
         with st.expander("📋 كيف أحصل على مفاتيح API الفيديو؟"):
             st.markdown("""
             <div style='color:#D0B070; font-size:0.88rem; line-height:2;'>
@@ -393,20 +323,35 @@ def _show_video_generation_tab(perfume_info: dict):
             <strong style='color:#F5D060;'>RunwayML Gen-3:</strong><br>
             1. افتح <a href="https://runwayml.com" target="_blank" style="color:#C0A0FF;">runwayml.com</a><br>
             2. سجّل حساباً → API → Generate Token<br>
-            3. أضف المفتاح في الإعدادات كـ RUNWAY_API_KEY
+            3. أضف المفتاح في الإعدادات كـ RUNWAY_API_KEY<br><br>
+            <strong style='color:#F5D060;'>Fal.ai (Kling/Veo/SVD):</strong><br>
+            1. افتح <a href="https://fal.ai" target="_blank" style="color:#C0A0FF;">fal.ai</a><br>
+            2. سجّل حساباً → API Keys → Create<br>
+            3. أضف المفتاح في الإعدادات كـ FAL_API_KEY
             </div>
             """, unsafe_allow_html=True)
         return
 
     st.markdown("---")
 
+    # بناء قائمة مزودي الفيديو المتاحين
+    provider_options = []
+    if has_luma:
+        provider_options.append("luma")
+    if has_runway:
+        provider_options.append("runway")
+    if has_fal:
+        provider_options.append("fal")
+    if not provider_options:
+        provider_options = ["luma"]
+
     # إعدادات الفيديو
     vc1, vc2, vc3 = st.columns(3)
     with vc1:
         video_provider = st.selectbox(
             "🎬 منصة التوليد",
-            options=["luma"] + (["runway"] if has_runway else []),
-            format_func=lambda x: "Luma Dream Machine" if x == "luma" else "RunwayML Gen-3",
+            options=provider_options,
+            format_func=lambda x: {"luma": "Luma Dream Machine", "runway": "RunwayML Gen-3", "fal": "Fal.ai (Kling/Veo/SVD)"}.get(x, x),
             key="video_provider"
         )
     with vc2:
@@ -423,6 +368,18 @@ def _show_video_generation_tab(perfume_info: dict):
             index=0,
             key="video_aspect"
         )
+
+    # نموذج Fal.ai (يظهر فقط عند اختيار Fal)
+    if video_provider == "fal":
+        fal_video_model = st.selectbox(
+            "🤖 نموذج Fal.ai للفيديو",
+            options=["kling", "veo", "svd"],
+            format_func=lambda x: {"kling": "Kling v1.6", "veo": "Veo 2", "svd": "Stable Video (SVD)"}.get(x, x),
+            key="fal_video_model",
+            help="Kling: أفضل للفيديو الاحترافي · Veo: جودة عالية · SVD: سريع وخفيف"
+        )
+    else:
+        fal_video_model = "kling"
 
     vr1, vr2 = st.columns(2)
     with vr1:
@@ -473,13 +430,30 @@ def _show_video_generation_tab(perfume_info: dict):
         key="video_extra"
     )
 
-    # صورة مرجعية للفيديو
-    video_ref_img = st.file_uploader(
-        "🖼️ صورة مرجعية للفيديو (اختياري — لـ image-to-video)",
-        type=["jpg", "jpeg", "png"],
-        key="video_ref_upload",
-        help="ارفع صورة لتحويلها إلى فيديو متحرك"
+    # مصدر الصورة المرجعية للفيديو
+    has_char_ref = bool(st.session_state.get("char_reference_bytes"))
+    ref_src_options = ["none", "video_upload"] + (["char_ref"] if has_char_ref else [])
+    ref_src_labels  = {
+        "none":         "بدون مرجع",
+        "video_upload": "رفع صورة جديدة",
+        "char_ref":     "مرجع مهووس المحدد",
+    }
+    video_ref_source = st.selectbox(
+        "🖼️ مصدر الصورة المرجعية (image-to-video)",
+        options=ref_src_options,
+        format_func=lambda k: ref_src_labels.get(k, k),
+        key="video_ref_source",
+        help="استخدم مرجع الشخصية المُختار أو ارفع صورة خاصة بالفيديو"
     )
+
+    video_ref_img = None
+    if video_ref_source == "video_upload":
+        video_ref_img = st.file_uploader(
+            "📤 ارفع صورة مرجعية للفيديو",
+            type=["jpg", "jpeg", "png"],
+            key="video_ref_upload",
+            help="ارفع صورة لتحويلها إلى فيديو متحرك"
+        )
 
     # بناء البرومت
     video_prompt = build_video_prompt(
@@ -500,10 +474,11 @@ def _show_video_generation_tab(perfume_info: dict):
     st.markdown("---")
 
     # ── زر التوليد ──
+    provider_label = {"luma": "Luma Dream Machine", "runway": "RunwayML Gen-3", "fal": "Fal.ai"}.get(video_provider, video_provider)
     gen_col1, gen_col2 = st.columns([2, 1])
     with gen_col1:
         generate_video_btn = st.button(
-            f"🎬 توليد الفيديو الآن — {'Luma Dream Machine' if video_provider == 'luma' else 'RunwayML Gen-3'}",
+            f"🎬 توليد الفيديو الآن — {provider_label}",
             type="primary",
             use_container_width=True,
             key="generate_video_btn"
@@ -512,9 +487,15 @@ def _show_video_generation_tab(perfume_info: dict):
         loop_video = st.checkbox("🔄 فيديو حلقي (Loop)", value=False, key="loop_video")
 
     if generate_video_btn:
-        ref_bytes = video_ref_img.getvalue() if video_ref_img else None
+        # تحديد بايتات الصورة المرجعية
+        if video_ref_source == "char_ref":
+            ref_bytes = st.session_state.get("char_reference_bytes")
+        elif video_ref_source == "video_upload":
+            ref_bytes = video_ref_img.getvalue() if video_ref_img else None
+        else:
+            ref_bytes = None
 
-        with st.spinner(f"⚡ جاري إرسال طلب التوليد إلى {'Luma' if video_provider == 'luma' else 'RunwayML'}..."):
+        with st.spinner(f"⚡ جاري إرسال طلب التوليد إلى {provider_label}..."):
             if video_provider == "luma":
                 result = generate_video_luma(
                     prompt=video_prompt,
@@ -523,17 +504,37 @@ def _show_video_generation_tab(perfume_info: dict):
                     aspect_ratio=video_aspect,
                     loop=loop_video
                 )
-            else:
-                ratio_map = {"9:16": "720:1280", "16:9": "1280:720", "1:1": "720:720"}
+            elif video_provider == "runway":
                 result = generate_video_runway(
                     prompt=video_prompt,
                     image_bytes=ref_bytes,
+                    aspect_ratio=video_aspect,
                     duration=video_duration,
-                    ratio=ratio_map.get(video_aspect, "720:1280")
+                )
+            else:  # fal
+                result = generate_video_fal(
+                    prompt=video_prompt,
+                    model=fal_video_model,
+                    aspect_ratio=video_aspect,
+                    image_bytes=ref_bytes,
                 )
 
         if result.get("error"):
             st.markdown(f"<div class='video-status-error'>❌ {result['error']}</div>", unsafe_allow_html=True)
+        elif result.get("state") == "completed" and result.get("video_url"):
+            # Fal.ai أو أي مزود أعاد الفيديو فوراً
+            video_url = result["video_url"]
+            st.markdown(f"""
+            <div class='video-status-done'>
+              ✅ الفيديو جاهز!
+              <a href="{video_url}" target="_blank" style="color:#A0FFD8; font-weight:900;">
+                ← تحميل الفيديو
+              </a>
+            </div>
+            """, unsafe_allow_html=True)
+            st.video(video_url)
+            st.session_state["video_url_ready"] = video_url
+            st.session_state.gen_count = st.session_state.get("gen_count", 0) + 1
         else:
             gen_id = result.get("id", "")
             st.session_state["video_gen_id"] = gen_id
@@ -559,6 +560,8 @@ def _show_video_generation_tab(perfume_info: dict):
                 with st.spinner("جاري الفحص..."):
                     if provider == "luma":
                         status = check_luma_status(gen_id)
+                    elif provider == "fal":
+                        status = check_fal_video_status(gen_id)
                     else:
                         status = check_runway_status(gen_id)
 
@@ -596,6 +599,8 @@ def _show_video_generation_tab(perfume_info: dict):
                     progress_bar.progress(time_wait, text=f"⏳ انتظار... {i*10} ثانية")
                     if provider == "luma":
                         status = check_luma_status(gen_id)
+                    elif provider == "fal":
+                        status = check_fal_video_status(gen_id)
                     else:
                         status = check_runway_status(gen_id)
                     if status.get("state") == "completed":
@@ -693,8 +698,12 @@ def _show_single_image_tab(perfume_info: dict):
         if img_extra:
             prompt += f"\nAdditional: {img_extra}"
 
-        with st.spinner("🎨 جاري توليد الصورة بـ Imagen 3..."):
-            img_bytes = generate_image_gemini(prompt, img_aspect)
+        with st.spinner("🎨 جاري توليد الصورة..."):
+            try:
+                img_bytes = smart_generate_image(prompt, img_aspect)
+            except Exception as e:
+                st.error(f"❌ فشل توليد الصورة: {e}")
+                img_bytes = None
 
         if img_bytes:
             st.image(img_bytes, caption=f"✅ {img_type} — {img_aspect}", use_container_width=True)
@@ -705,8 +714,298 @@ def _show_single_image_tab(perfume_info: dict):
                 "image/jpeg",
                 use_container_width=True
             )
-        else:
-            st.error("❌ فشل توليد الصورة — تأكد من صحة GEMINI_API_KEY")
+
+
+# ─── Smart Trends Panel ───────────────────────────────────────────────────────
+def _show_smart_trends_panel(perfume_info: dict):
+    """لوحة ترندات ذكية مدمجة — تظهر تلقائياً بعد تحديد المنتج"""
+    product_key = f"trends_{perfume_info.get('product_name','')}"
+
+    # تحقق هل يوجد ترند محفوظ لهذا المنتج
+    cached = st.session_state.get(product_key)
+
+    header_col, btn_col = st.columns([3, 1])
+    with header_col:
+        st.markdown("""
+        <div style='display:flex; align-items:center; gap:0.6rem; margin-bottom:0.4rem;'>
+          <span style='font-size:1.4rem;'>🔥</span>
+          <span style='color:#FFE060; font-size:1rem; font-weight:900;'>ترندات ذكية مقترحة</span>
+          <span style='color:#906030; font-size:0.8rem;'> — بناءً على هذا المنتج</span>
+        </div>
+        """, unsafe_allow_html=True)
+    with btn_col:
+        refresh = st.button(
+            "⚡ تحليل" if not cached else "🔄 تحديث",
+            key=f"refresh_trends_{product_key}",
+            use_container_width=True,
+            help="تحليل ترندات المنتج بالذكاء الاصطناعي"
+        )
+
+    if refresh or not cached:
+        with st.spinner("🔍 جاري تحليل الترندات..."):
+            try:
+                data = generate_trend_insights(perfume_info)
+                st.session_state[product_key] = data
+                cached = data
+            except Exception as e:
+                st.warning(f"⚠️ تعذّر تحليل الترندات: {e}")
+                return
+
+    if not cached or "error" in cached:
+        if cached and "error" in cached:
+            st.caption(f"⚠️ {cached['error']}")
+        return
+
+    # ── عرض مضغوط ──
+    if cached.get("product_summary"):
+        st.markdown(
+            f"<div style='background:rgba(212,175,55,0.08); border-right:3px solid #F0CC55; "
+            f"padding:0.5rem 0.8rem; border-radius:0 0.4rem 0.4rem 0; color:#FFE8A0; "
+            f"font-size:0.88rem; margin-bottom:0.6rem;'>💡 {cached['product_summary']}</div>",
+            unsafe_allow_html=True
+        )
+
+    # أبرز 3 ترندات
+    topics = cached.get("trending_topics", [])[:3]
+    if topics:
+        cols = st.columns(len(topics))
+        platform_colors = {"TikTok": "#FF2D55", "Instagram": "#C13584", "Twitter": "#1DA1F2"}
+        for col, t in zip(cols, topics):
+            with col:
+                plat = t.get("platform", "")
+                color = platform_colors.get(plat, "#A090D0")
+                st.markdown(f"""
+                <div style='background:#1A1206; border:1.5px solid rgba(212,175,55,0.25);
+                     border-radius:0.6rem; padding:0.7rem; height:100%;'>
+                  <div style='color:{color}; font-size:0.72rem; font-weight:900; margin-bottom:0.3rem;'>
+                    {plat}
+                  </div>
+                  <div style='color:#FFE060; font-size:0.85rem; font-weight:800;'>{t.get('topic','')}</div>
+                  <div style='color:#A09070; font-size:0.75rem; margin-top:0.3rem; line-height:1.4;'>
+                    {t.get('hook','')[:80]}
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    # أبرز هوكين
+    hooks = cached.get("viral_hooks", [])[:2]
+    if hooks:
+        st.markdown("<div style='margin-top:0.5rem;'>", unsafe_allow_html=True)
+        for h in hooks:
+            st.markdown(
+                f"<div style='background:rgba(255,60,60,0.08); border:1px solid rgba(255,60,60,0.30); "
+                f"border-radius:0.5rem; padding:0.4rem 0.8rem; color:#FFB8B8; font-size:0.82rem; "
+                f"margin-bottom:0.3rem;'>🎯 {h}</div>",
+                unsafe_allow_html=True
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.caption("💡 انتقل إلى تبويب 🔥 ترند ذكي للتفاصيل الكاملة")
+
+
+def _show_trends_tab(perfume_info: dict):
+    """تبويب الترندات الذكية الكامل"""
+    st.markdown("""
+    <div class="video-card">
+      <h3>🔥 ترند ذكي</h3>
+      <div style='color:#A090D0; font-size:0.85rem;'>
+        تحليل المنتج واقتراح مواضيع ترند فيروسية · هوكات صادمة · زوايا محتوى جديدة
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    product_key = f"trends_{perfume_info.get('product_name','')}"
+    cached = st.session_state.get(product_key)
+
+    btn_col1, btn_col2 = st.columns([2, 1])
+    with btn_col1:
+        if st.button("🔥 تحليل الترندات الآن", type="primary", use_container_width=True, key="trends_full_btn"):
+            with st.spinner("🔍 يحلل الذكاء الاصطناعي المنتج ويبحث عن الترندات..."):
+                try:
+                    data = generate_trend_insights(perfume_info)
+                    st.session_state[product_key] = data
+                    cached = data
+                    st.session_state.gen_count = st.session_state.get("gen_count", 0) + 1
+                except Exception as e:
+                    st.error(f"❌ خطأ في التحليل: {e}")
+    with btn_col2:
+        if cached and st.button("🗑️ مسح", use_container_width=True, key="trends_clear_btn"):
+            st.session_state.pop(product_key, None)
+            st.rerun()
+
+    if not cached:
+        st.info("💡 انقر 'تحليل الترندات الآن' لتحليل المنتج وإيجاد أفضل المواضيع الرائجة")
+        return
+
+    if "error" in cached:
+        st.error(cached["error"])
+        return
+
+    # ── ملخص المنتج والجمهور ───────────────────────────────────────
+    if cached.get("product_summary") or cached.get("target_audience"):
+        st.markdown("#### 🎯 تشخيص المنتج")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"""
+            <div style='background:rgba(212,175,55,0.08); border:1.5px solid rgba(212,175,55,0.35);
+                 border-radius:0.7rem; padding:1rem;'>
+              <div style='color:#F5D060; font-weight:900; font-size:0.85rem; margin-bottom:0.4rem;'>
+                💡 هوية العطر
+              </div>
+              <div style='color:#E8D5A0; font-size:0.9rem; line-height:1.6;'>
+                {cached.get('product_summary','—')}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"""
+            <div style='background:rgba(60,120,255,0.08); border:1.5px solid rgba(60,120,255,0.30);
+                 border-radius:0.7rem; padding:1rem;'>
+              <div style='color:#A0C0FF; font-weight:900; font-size:0.85rem; margin-bottom:0.4rem;'>
+                👥 الجمهور المستهدف
+              </div>
+              <div style='color:#C0D8FF; font-size:0.9rem; line-height:1.6;'>
+                {cached.get('target_audience','—')}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── المواضيع الترند ───────────────────────────────────────────
+    topics = cached.get("trending_topics", [])
+    if topics:
+        st.markdown("#### 🔥 المواضيع الرائجة المقترحة")
+        platform_colors = {"TikTok": "#FF2D55", "Instagram": "#C13584", "Twitter": "#1DA1F2"}
+        for t in topics:
+            plat = t.get("platform", "")
+            color = platform_colors.get(plat, "#A090D0")
+            st.markdown(f"""
+            <div style='background:#1A1206; border:1.5px solid rgba(212,175,55,0.25);
+                 border-left:4px solid {color}; border-radius:0 0.6rem 0.6rem 0;
+                 padding:0.9rem 1rem; margin-bottom:0.7rem;'>
+              <div style='display:flex; justify-content:space-between; align-items:flex-start;'>
+                <div>
+                  <span style='color:{color}; font-size:0.75rem; font-weight:900;'>{plat}</span>
+                  <span style='color:#FFE060; font-size:1rem; font-weight:900; margin-right:0.5rem;'>
+                    {t.get('topic','')}
+                  </span>
+                </div>
+              </div>
+              <div style='color:#A09070; font-size:0.82rem; margin-top:0.4rem;'>
+                🔗 {t.get('relevance','')}
+              </div>
+              <div style='background:rgba(255,60,60,0.10); border:1px solid rgba(255,60,60,0.25);
+                   border-radius:0.4rem; padding:0.4rem 0.7rem; margin-top:0.5rem;
+                   color:#FFB8B8; font-size:0.85rem;'>
+                🎯 الهوك: {t.get('hook','')}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ── هوكات فيروسية ─────────────────────────────────────────────
+    hooks = cached.get("viral_hooks", [])
+    if hooks:
+        st.markdown("#### 💥 هوكات فيروسية جاهزة")
+        for i, h in enumerate(hooks, 1):
+            st.markdown(f"""
+            <div style='background:rgba(255,60,60,0.08); border:1.5px solid rgba(255,60,60,0.35);
+                 border-radius:0.6rem; padding:0.7rem 1rem; margin-bottom:0.5rem;
+                 color:#FFD0D0; font-size:0.92rem; font-weight:800;'>
+              {i}. {h}
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ── زوايا المحتوى ─────────────────────────────────────────────
+    angles = cached.get("content_angles", [])
+    if angles:
+        st.markdown("#### 🎬 زوايا محتوى جديدة")
+        ac1, ac2 = st.columns(2)
+        for i, a in enumerate(angles):
+            with (ac1 if i % 2 == 0 else ac2):
+                fmt = a.get("format", "")
+                fmt_color = "#FF2D55" if "ريلز" in fmt else "#C13584" if "بوست" in fmt else "#1DA1F2"
+                st.markdown(f"""
+                <div style='background:#1A1206; border:1.5px solid rgba(212,175,55,0.20);
+                     border-radius:0.6rem; padding:0.8rem; margin-bottom:0.6rem; height:100%;'>
+                  <div style='display:flex; justify-content:space-between; margin-bottom:0.4rem;'>
+                    <span style='color:#FFE060; font-weight:900; font-size:0.88rem;'>
+                      {a.get('angle','')}
+                    </span>
+                    <span style='color:{fmt_color}; font-size:0.75rem; font-weight:800;
+                         background:rgba(255,255,255,0.06); padding:0.1rem 0.5rem;
+                         border-radius:999px;'>{fmt}</span>
+                  </div>
+                  <div style='color:#C0A870; font-size:0.82rem; line-height:1.5;'>
+                    {a.get('description','')}
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    # ── الهاشتاقات الرائجة ────────────────────────────────────────
+    t_tags = cached.get("trending_hashtags", {})
+    if t_tags:
+        st.markdown("#### #️⃣ الهاشتاقات الرائجة المقترحة")
+        th1, th2 = st.columns(2)
+        with th1:
+            viral = t_tags.get("viral", [])
+            if viral:
+                st.markdown("**🔥 فيروسية**")
+                st.markdown(
+                    " ".join(f"<span class='hashtag-pill'>{h}</span>" for h in viral),
+                    unsafe_allow_html=True
+                )
+            niche = t_tags.get("niche", [])
+            if niche:
+                st.markdown("**🎯 متخصصة**")
+                st.markdown(
+                    " ".join(f"<span class='hashtag-pill'>{h}</span>" for h in niche),
+                    unsafe_allow_html=True
+                )
+        with th2:
+            buying = t_tags.get("buying", [])
+            if buying:
+                st.markdown("**🛍️ شرائية**")
+                st.markdown(
+                    " ".join(f"<span class='hashtag-pill'>{h}</span>" for h in buying),
+                    unsafe_allow_html=True
+                )
+
+    # ── أوقات النشر وفرص إضافية ───────────────────────────────────
+    times = cached.get("best_post_times", {})
+    gap   = cached.get("competitor_gap", "")
+    season = cached.get("seasonal_angle", "")
+
+    if times or gap or season:
+        st.markdown("---")
+        bt1, bt2, bt3 = st.columns(3)
+        if times:
+            with bt1:
+                st.markdown("#### 🕐 أفضل أوقات النشر")
+                for plat, t in times.items():
+                    st.markdown(
+                        f"<div style='color:#D4B870; font-size:0.83rem; margin-bottom:0.3rem;'>"
+                        f"<strong>{plat}:</strong> {t}</div>",
+                        unsafe_allow_html=True
+                    )
+        if gap:
+            with bt2:
+                st.markdown("#### 💎 فرصة غير مستغلة")
+                st.markdown(
+                    f"<div style='background:rgba(80,200,80,0.08); border:1.5px solid rgba(80,200,80,0.30); "
+                    f"border-radius:0.6rem; padding:0.8rem; color:#A0EFA0; font-size:0.85rem; "
+                    f"line-height:1.5;'>{gap}</div>",
+                    unsafe_allow_html=True
+                )
+        if season:
+            with bt3:
+                st.markdown("#### 📅 الزاوية الموسمية")
+                st.markdown(
+                    f"<div style='background:rgba(255,200,50,0.08); border:1.5px solid rgba(255,200,50,0.30); "
+                    f"border-radius:0.6rem; padding:0.8rem; color:#FFE8A0; font-size:0.85rem; "
+                    f"line-height:1.5;'>{season}</div>",
+                    unsafe_allow_html=True
+                )
 
 
 # ─── Main Studio Page ──────────────────────────────────────────────────────────
@@ -726,6 +1025,7 @@ def show_studio_page():
     has_openrouter = bool(secrets["openrouter"])
     has_luma       = bool(secrets["luma"])
     has_runway     = bool(secrets["runway"])
+    has_fal        = bool(secrets["fal"])
 
     # API Status Bar
     api_status = []
@@ -733,6 +1033,7 @@ def show_studio_page():
     api_status.append(f"{'🟢' if has_openrouter else '🔴'} OpenRouter")
     api_status.append(f"{'🟢' if has_luma else '🔴'} Luma")
     api_status.append(f"{'🟢' if has_runway else '🔴'} RunwayML")
+    api_status.append(f"{'🟢' if has_fal else '🔴'} Fal.ai")
     st.markdown(f"""
     <div style='background:rgba(212,175,55,0.06); border:1px solid rgba(212,175,55,0.20);
          border-radius:0.6rem; padding:0.6rem 1rem; margin-bottom:1rem;
@@ -795,15 +1096,51 @@ def show_studio_page():
 
         with col_char:
             st.markdown("**⚙️ إعدادات الجلسة**")
-            char_img = st.file_uploader(
-                "👤 صورة مرجعية لمهووس (اختياري)",
-                type=["jpg", "jpeg", "png"],
-                key="char_upload",
-                help="mahwous_character.png — يحافظ على ثبات الشخصية"
+
+            # ── مرجع شخصية مهووس المدمج ──────────────────────────
+            BUILTIN_REFS = {
+                "none":       ("بدون مرجع",        None),
+                "official":   ("رسمي",              "assets/character/mahwous_character_official.jpeg"),
+                "hoodie":     ("هودي",              "assets/character/mahwous_hoodie.jpg"),
+                "thobe":      ("ثوب",               "assets/character/mahwous_thobe.jpg"),
+                "thobe_car":  ("ثوب + سيارة",       "assets/character/mahwous_thobe_car.jpg"),
+                "tomford":    ("توم فورد",           "assets/character/mahwous_tomford.png"),
+                "upload":     ("رفع صورة يدوياً",   None),
+            }
+            ref_choice = st.selectbox(
+                "👤 مرجع مهووس",
+                options=list(BUILTIN_REFS.keys()),
+                format_func=lambda k: BUILTIN_REFS[k][0],
+                key="char_ref_choice",
+                help="اختر مرجعاً مدمجاً أو ارفع صورتك الخاصة"
             )
-            if char_img:
-                st.image(char_img, caption="✅ مرجع مهووس", use_container_width=True)
-                st.session_state.char_reference = char_img.getvalue()
+
+            if ref_choice == "upload":
+                char_img = st.file_uploader(
+                    "📤 ارفع صورة مرجعية",
+                    type=["jpg", "jpeg", "png"],
+                    key="char_upload",
+                    help="mahwous_character.png — يحافظ على ثبات الشخصية"
+                )
+                if char_img:
+                    st.image(char_img, caption="✅ مرجع مهووس", use_container_width=True)
+                    _ref_val = char_img.getvalue()
+                    st.session_state.char_reference = _ref_val
+                    st.session_state.char_reference_bytes = _ref_val
+                else:
+                    st.session_state.char_reference_bytes = None
+            elif ref_choice != "none":
+                asset_path = BUILTIN_REFS[ref_choice][1]
+                ref_bytes = load_asset_bytes(asset_path)
+                if ref_bytes:
+                    st.image(ref_bytes, caption=f"✅ {BUILTIN_REFS[ref_choice][0]}", use_container_width=True)
+                    st.session_state.char_reference = ref_bytes
+                    st.session_state.char_reference_bytes = ref_bytes
+                else:
+                    st.warning("⚠️ تعذّر تحميل الصورة المرجعية")
+                    st.session_state.char_reference_bytes = None
+            else:
+                st.session_state.char_reference_bytes = None
 
         if not uploaded:
             _show_how_it_works()
@@ -879,14 +1216,21 @@ def show_studio_page():
 
     st.markdown("---")
 
+    # ─── Smart Trends: Auto-trigger after product is known ───────────────────
+    _show_smart_trends_panel(perfume_info)
+
+    st.markdown("---")
+
     # ─── Main Tabs ───────────────────────────────────────────────────────────
-    tab_images, tab_video, tab_single, tab_captions, tab_scenario, tab_content = st.tabs([
+    tab_images, tab_video, tab_single, tab_captions, tab_scenario, tab_content, tab_publish, tab_trends = st.tabs([
         "🖼️ توليد الصور",
         "🎬 توليد الفيديو",
         "🎨 صورة مخصصة",
         "✍️ التعليقات",
         "🎭 السيناريو",
-        "📝 المحتوى"
+        "📝 المحتوى",
+        "📤 نشر",
+        "🔥 ترند ذكي",
     ])
 
     # ════════════════════════════════════════════════════════════
@@ -943,29 +1287,31 @@ def show_studio_page():
                 use_container_width=True,
                 key="generate_images_btn"
             ):
-                progress_bar = st.progress(0, text="⚡ جاري التوليد...")
-                status_text  = st.empty()
-
-                def update_progress(val, msg):
-                    progress_bar.progress(val, text=msg)
-                    status_text.markdown(f"<div style='color:#D4B870; font-size:0.85rem;'>{msg}</div>", unsafe_allow_html=True)
-
-                try:
-                    results = generate_platform_images(
-                        info=perfume_info,
-                        selected_platforms=selected_platforms,
-                        outfit=outfit,
-                        scene=scene,
-                        include_character=include_char,
-                        progress_callback=update_progress,
-                        ramadan_mode=ramadan_mode
-                    )
-                    st.session_state.generated_images = results
-                    st.session_state.gen_count = st.session_state.get("gen_count", 0) + len(selected_platforms)
-                    status_text.empty()
-                    st.success(f"✅ تم توليد {len([r for r in results.values() if r.get('bytes')])} صورة بنجاح!")
-                except Exception as e:
-                    st.error(f"❌ خطأ في التوليد: {e}")
+                with st.spinner("⚡ جاري التوليد المتوازي..."):
+                    try:
+                        # إذا تم اختيار جميع المقاسات الثلاثة استخدم التوليد المتوازي
+                        if set(selected_platforms) == set(PLATFORMS.keys()):
+                            results = generate_concurrent_images(
+                                info=perfume_info,
+                                outfit=outfit,
+                                scene=scene,
+                                include_character=include_char,
+                                ramadan_mode=ramadan_mode
+                            )
+                        else:
+                            results = generate_platform_images(
+                                info=perfume_info,
+                                selected_platforms=selected_platforms,
+                                outfit=outfit,
+                                scene=scene,
+                                include_character=include_char,
+                                ramadan_mode=ramadan_mode
+                            )
+                        st.session_state.generated_images = results
+                        st.session_state.gen_count = st.session_state.get("gen_count", 0) + len(selected_platforms)
+                        st.success(f"✅ تم توليد {len([r for r in results.values() if r.get('bytes')])} صورة بنجاح!")
+                    except Exception as e:
+                        st.error(f"❌ خطأ في التوليد: {e}")
 
         # عرض الصور المولدة
         if "generated_images" in st.session_state and st.session_state.generated_images:
@@ -1012,10 +1358,10 @@ def show_studio_page():
     # TAB 3: صورة مخصصة
     # ════════════════════════════════════════════════════════════
     with tab_single:
-        if has_gemini:
+        if has_gemini or has_fal:
             _show_single_image_tab(perfume_info)
         else:
-            st.error("❌ GEMINI_API_KEY مطلوب — أضفه في الإعدادات")
+            st.error("❌ GEMINI_API_KEY أو FAL_API_KEY مطلوب لتوليد الصور — أضف أحدهما في الإعدادات")
 
     # ════════════════════════════════════════════════════════════
     # TAB 4: التعليقات
@@ -1036,6 +1382,11 @@ def show_studio_page():
                 st.error(captions["error"])
             else:
                 platform_names = {
+                    # المقاسات الثلاثة الجديدة (v13.0)
+                    "post_1_1":   "📸 منشور مربع 1:1",
+                    "story_9_16": "📱 قصة عمودية 9:16",
+                    "wide_16_9":  "🎬 عريض أفقي 16:9",
+                    # مفاتيح قديمة للتوافق مع generate_all_captions التي قد تُنتج مفاتيح بأسماء المنصات
                     "instagram_post": "📸 Instagram Post", "instagram_story": "📱 Instagram Story",
                     "tiktok": "🎵 TikTok", "youtube_short": "▶️ YouTube Short",
                     "youtube_thumb": "🎬 YouTube Thumbnail", "twitter": "🐦 Twitter/X",
@@ -1110,6 +1461,42 @@ def show_studio_page():
                 st.markdown(f'<div class="flow-prompt">{sc.get("flow_prompt", "")}</div>', unsafe_allow_html=True)
                 st.code(sc.get("flow_prompt", ""), language="text")
 
+        # ── تعليق صوتي ElevenLabs ────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 🎙️ التعليق الصوتي (ElevenLabs)")
+        voiceover_text = st.text_area(
+            "نص التعليق الصوتي",
+            value=st.session_state.get("scenario_data", {}).get("hook", ""),
+            height=100,
+            key="voiceover_text_input",
+            placeholder="أدخل النص الذي تريد تحويله إلى صوت..."
+        )
+        if st.button("🎙️ توليد التعليق الصوتي", use_container_width=True, key="gen_voiceover_btn"):
+            secrets = _get_secrets()
+            if not secrets.get("elevenlabs"):
+                st.error("❌ ELEVENLABS_API_KEY مفقود — أضفه في إعدادات API")
+            elif not voiceover_text.strip():
+                st.warning("⚠️ أدخل نصاً للتعليق الصوتي أولاً")
+            else:
+                with st.spinner("🎙️ جاري توليد التعليق الصوتي..."):
+                    try:
+                        audio_bytes = generate_voiceover_elevenlabs(voiceover_text)
+                        st.session_state.voiceover_bytes = audio_bytes
+                        st.success("✅ تم توليد التعليق الصوتي!")
+                    except Exception as e:
+                        st.error(f"❌ فشل التوليد: {e}")
+
+        if "voiceover_bytes" in st.session_state:
+            st.audio(st.session_state.voiceover_bytes, format="audio/mpeg")
+            st.download_button(
+                "⬇️ تحميل الصوت (MP3)",
+                st.session_state.voiceover_bytes,
+                "voiceover.mp3",
+                "audio/mpeg",
+                use_container_width=True,
+                key="dl_voiceover"
+            )
+
     # ════════════════════════════════════════════════════════════
     # TAB 6: المحتوى
     # ════════════════════════════════════════════════════════════
@@ -1167,3 +1554,186 @@ def show_studio_page():
                         st.error(f"❌ {e}")
             if "story_data" in st.session_state:
                 st.text_area("📖 قصة العطر", st.session_state.story_data, height=300, key="story_text")
+
+    # ════════════════════════════════════════════════════════════
+    # TAB 7: نشر المحتوى
+    # ════════════════════════════════════════════════════════════
+    with tab_publish:
+        st.markdown("""
+        <div class="video-card">
+          <h3>📤 نشر المحتوى</h3>
+          <div style='color:#A090D0; font-size:0.85rem;'>
+            إرسال الصور والفيديو والتعليقات إلى Make.com لنشرها تلقائياً
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        secrets = _get_secrets()
+        has_webhook = bool(secrets.get("webhook"))
+
+        # ── آخر عملية نشر (دائم عبر الجلسة) ───────────────────────
+        last_pub = st.session_state.get("publish_last_result")
+        if last_pub:
+            platforms_str = " · ".join(last_pub.get("platforms", []))
+            if last_pub.get("success"):
+                st.markdown(f"""
+                <div class='video-status-done'>
+                  ✅ <strong>تم النشر بنجاح!</strong><br>
+                  🕐 {last_pub['timestamp']} &nbsp;|&nbsp;
+                  📡 كود الاستجابة: {last_pub.get('status_code', '—')}<br>
+                  🎯 المنصات: {platforms_str or '—'}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class='video-status-error'>
+                  ❌ <strong>فشل النشر</strong><br>
+                  🕐 {last_pub['timestamp']} &nbsp;|&nbsp; {last_pub.get('error', 'خطأ غير معروف')}<br>
+                  🎯 المنصات المحاولة: {platforms_str or '—'}
+                </div>
+                """, unsafe_allow_html=True)
+
+            if st.button("🗑️ مسح سجل النشر", key="clear_publish_log"):
+                st.session_state.pop("publish_last_result", None)
+                st.rerun()
+
+            st.markdown("---")
+
+        # ── حالة المحتوى المتاح ──────────────────────────────────
+        has_images   = bool(st.session_state.get("generated_images"))
+        has_video    = bool(st.session_state.get("video_url_ready"))
+        has_captions = bool(st.session_state.get("captions_data"))
+
+        st.markdown("#### 📋 ملخص المحتوى المتاح للنشر")
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            if has_images:
+                img_count = len([v for v in st.session_state.generated_images.values() if v.get("bytes")])
+                st.markdown(f"<span class='api-badge-ok'>🖼️ {img_count} صور جاهزة</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span class='api-badge-no'>🖼️ لا توجد صور — ولّد صوراً أولاً</span>", unsafe_allow_html=True)
+        with sc2:
+            if has_video:
+                st.markdown("<span class='api-badge-ok'>🎬 فيديو جاهز</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span class='api-badge-no'>🎬 لا يوجد فيديو بعد</span>", unsafe_allow_html=True)
+        with sc3:
+            if has_captions:
+                st.markdown("<span class='api-badge-ok'>✍️ تعليقات جاهزة</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span class='api-badge-no'>✍️ لا توجد تعليقات — ولّد تعليقات أولاً</span>", unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # ── إعدادات المنصة ───────────────────────────────────────
+        if not has_webhook:
+            st.markdown("""
+            <div class='warning-box'>
+              ⚠️ <strong>MAKE_WEBHOOK_URL</strong> غير محدد — أضفه في <strong>إعدادات API</strong> لتفعيل النشر التلقائي
+            </div>
+            """, unsafe_allow_html=True)
+
+        # اختيار المنصات المراد النشر عليها
+        st.markdown("#### 🎯 اختر المقاسات المراد نشرها")
+        publish_plat_opts = {
+            "post_1_1":   "📸 منشور مربع 1:1",
+            "story_9_16": "📱 قصة عمودية 9:16",
+            "wide_16_9":  "🎬 عريض أفقي 16:9",
+        }
+        p1, p2, p3 = st.columns(3)
+        selected_publish_platforms = []
+        for i, (key, label) in enumerate(publish_plat_opts.items()):
+            col = [p1, p2, p3][i % 3]
+            if col.checkbox(label, value=True, key=f"pub_{key}"):
+                selected_publish_platforms.append(key)
+
+        # معاينة الـ payload
+        with st.expander("👁️ معاينة البيانات المُرسلة (Payload)"):
+            preview_images = {}
+            if has_images:
+                for key, data in st.session_state.generated_images.items():
+                    if data.get("bytes") and key in selected_publish_platforms:
+                        preview_images[key] = f"[صورة {data['w']}×{data['h']} — {len(data['bytes'])//1024} KB]"
+            preview_payload = {
+                "perfume": {
+                    "brand": perfume_info.get("brand", ""),
+                    "product_name": perfume_info.get("product_name", ""),
+                },
+                "images_count": len(preview_images),
+                "images": preview_images,
+                "video_url": st.session_state.get("video_url_ready", ""),
+                "captions_platforms": list(st.session_state.get("captions_data", {}).keys()),
+                "selected_platforms": selected_publish_platforms,
+            }
+            st.json(preview_payload)
+
+        st.markdown("---")
+
+        # ── زر النشر ─────────────────────────────────────────────
+        if not has_images and not has_video:
+            st.warning("⚠️ ولّد صوراً أو فيديو أولاً قبل النشر")
+        elif not has_webhook:
+            st.info("💡 أضف MAKE_WEBHOOK_URL في الإعدادات ثم انقر النشر")
+        else:
+            if st.button("📤 نشر الآن عبر Make.com", type="primary", use_container_width=True, key="publish_btn"):
+                # بناء image_urls من الصور المولّدة (base64 data URIs)
+                image_urls = {}
+                if has_images:
+                    for key, data in st.session_state.generated_images.items():
+                        if data.get("bytes") and key in selected_publish_platforms:
+                            b64 = base64.b64encode(data["bytes"]).decode()
+                            image_urls[key] = f"data:image/jpeg;base64,{b64}"
+
+                video_url  = st.session_state.get("video_url_ready", "")
+                captions   = st.session_state.get("captions_data", {})
+
+                payload = build_make_payload(perfume_info, image_urls, video_url, captions)
+                payload["selected_platforms"] = selected_publish_platforms
+
+                with st.spinner("📤 جاري الإرسال إلى Make.com..."):
+                    result = send_to_make(payload)
+
+                if result.get("success"):
+                    st.session_state.publish_last_result = {
+                        "success":    True,
+                        "timestamp":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "platforms":  selected_publish_platforms,
+                        "status_code": result.get("status_code", "—"),
+                        "response":   str(result.get("response", ""))[:200],
+                    }
+                    st.session_state.gen_count = st.session_state.get("gen_count", 0) + 1
+                else:
+                    st.session_state.publish_last_result = {
+                        "success":   False,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "platforms": selected_publish_platforms,
+                        "error":     result.get("error", "خطأ غير معروف"),
+                    }
+                st.rerun()
+
+        # ── مزامنة Supabase ───────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 🗄️ حفظ في Supabase")
+        if st.button("🗄️ مزامنة مع Supabase", use_container_width=True, key="sync_supabase_btn"):
+            from modules.supabase_db import save_perfume_to_supabase
+            images_with_urls = {}
+            if has_images:
+                for key, data in st.session_state.generated_images.items():
+                    url_val = data.get("url")
+                    if url_val:
+                        images_with_urls[key] = {"url": url_val}
+            result_sb = save_perfume_to_supabase(
+                info=perfume_info,
+                images=images_with_urls,
+                video_url=st.session_state.get("video_url_ready", "")
+            )
+            if result_sb.get("success"):
+                st.success("✅ تم الحفظ في Supabase بنجاح!")
+            else:
+                st.error(f"❌ فشل الحفظ في Supabase: {result_sb.get('error', 'خطأ غير معروف')}")
+
+    # ════════════════════════════════════════════════════════════
+    # TAB 8: ترند ذكي
+    # ════════════════════════════════════════════════════════════
+    with tab_trends:
+        _show_trends_tab(perfume_info)
