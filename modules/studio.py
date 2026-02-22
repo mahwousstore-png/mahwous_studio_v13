@@ -229,13 +229,10 @@ def _info_card(info: dict):
 # ─── Platform Selector ────────────────────────────────────────────────────────
 def platform_selector() -> list:
     if "selected_platforms" not in st.session_state:
-        st.session_state.selected_platforms = ["instagram_post", "instagram_story", "tiktok", "twitter"]
+        st.session_state.selected_platforms = ["post_1_1", "story_9_16", "wide_16_9"]
 
     groups = {
-        "📱 عمودي 9:16 — قصص وريلز": ["instagram_story", "tiktok", "youtube_short", "snapchat"],
-        "🖼️ مربع 1:1 — منشور إنستجرام": ["instagram_post"],
-        "🖥️ أفقي 16:9 — يوتيوب وتويتر": ["twitter", "youtube_thumb", "facebook", "linkedin"],
-        "📌 رأسي 2:3 — بينتريست": ["pinterest"],
+        "🖼️ المقاسات الأساسية": ["post_1_1", "story_9_16", "wide_16_9"],
     }
 
     c1, c2, c3 = st.columns([1, 1, 2])
@@ -1318,6 +1315,34 @@ def show_studio_page():
                     st.success(f"✅ تم توليد {len([r for r in results.values() if r.get('bytes')])} صورة بنجاح!")
                 except Exception as e:
                     st.error(f"❌ خطأ في التوليد: {e}")
+
+        # ─── زر المزامنة ───
+        if "generated_images" in st.session_state:
+            st.markdown("---")
+            sync_col1, sync_col2 = st.columns(2)
+            with sync_col1:
+                if st.button("🔗 إرسال إلى Make.com", use_container_width=True, key="sync_make"):
+                    from modules.ai_engine import send_to_make, build_make_payload
+                    image_urls = {k: v.get("url", "") for k, v in st.session_state.generated_images.items() if isinstance(v, dict)}
+                    payload = build_make_payload(
+                        perfume_info,
+                        image_urls,
+                        st.session_state.get("video_url_ready", ""),
+                        st.session_state.get("captions_data", {})
+                    )
+                    res = send_to_make(payload)
+                    if res["success"]: st.success("✅ تم الإرسال لـ Make.com!")
+                    else: st.error(f"❌ فشل: {res.get('error', 'خطأ غير معروف')}")
+            with sync_col2:
+                if st.button("🗄️ حفظ في Supabase", use_container_width=True, key="sync_supabase"):
+                    from modules.supabase_db import save_perfume_to_supabase
+                    res = save_perfume_to_supabase(
+                        perfume_info,
+                        st.session_state.generated_images,
+                        st.session_state.get("video_url_ready", "")
+                    )
+                    if res["success"]: st.success("✅ تم الحفظ في Supabase!")
+                    else: st.error(f"❌ فشل: {res.get('error', 'خطأ غير معروف')}")
 
         # عرض الصور المولدة
         if "generated_images" in st.session_state and st.session_state.generated_images:

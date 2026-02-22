@@ -440,6 +440,26 @@ def show_settings_page():
             st.session_state.webhook_url = webhook_url
             st.success("✅ تم حفظ Webhook!")
 
+    # ── Supabase ────────────────────────────────────────────────────────────
+    with st.expander("🗄️ Supabase Database (تخزين بيانات العطور — اختياري)"):
+        supabase_url = st.text_input(
+            "SUPABASE_URL",
+            value=st.session_state.get("supabase_url", ""),
+            placeholder="https://xyz.supabase.co",
+            key="supabase_url_input"
+        )
+        supabase_key = st.text_input(
+            "SUPABASE_KEY (Anon/Service Role)",
+            value=st.session_state.get("supabase_key", ""),
+            type="password",
+            placeholder="eyJhbGciOiJIUzI1NiI...",
+            key="supabase_key_input"
+        )
+        if st.button("💾 حفظ إعدادات Supabase", use_container_width=True, key="save_supabase"):
+            st.session_state.supabase_url = supabase_url
+            st.session_state.supabase_key = supabase_key
+            st.success("✅ تم حفظ إعدادات Supabase!")
+
     # ── حفظ الكل ────────────────────────────────────────────────────────────
     st.markdown("---")
     if st.button("💾 حفظ جميع الإعدادات", type="primary", use_container_width=True, key="save_all"):
@@ -448,6 +468,8 @@ def show_settings_page():
         st.session_state.luma_key       = st.session_state.get("luma_key_input", "")
         st.session_state.runway_key     = st.session_state.get("runway_key_input", "")
         st.session_state.webhook_url    = st.session_state.get("webhook_url_input", "")
+        st.session_state.supabase_url   = st.session_state.get("supabase_url_input", "")
+        st.session_state.supabase_key   = st.session_state.get("supabase_key_input", "")
         st.success("✅ تم حفظ جميع الإعدادات بنجاح!")
         st.balloons()
 
