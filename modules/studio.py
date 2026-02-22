@@ -12,7 +12,7 @@ from datetime import datetime
 from PIL import Image
 
 from modules.ai_engine import (
-    analyze_perfume_image, generate_platform_images,
+    analyze_perfume_image, generate_platform_images, generate_concurrent_images,
     generate_all_captions, generate_descriptions,
     generate_hashtags, generate_scenario,
     generate_video_luma, check_luma_status, poll_luma_video,
@@ -21,7 +21,7 @@ from modules.ai_engine import (
     generate_image_gemini, smart_generate_image, generate_perfume_story,
     build_manual_info, build_video_prompt,
     send_to_make, build_make_payload,
-    generate_trend_insights,
+    generate_trend_insights, generate_voiceover_elevenlabs,
     load_asset_bytes,
     PLATFORMS, MAHWOUS_OUTFITS, FAL_VIDEO_MODELS, _get_secrets
 )
@@ -1281,40 +1281,42 @@ def show_studio_page():
             ramadan_mode = st.checkbox("🌙 وضع رمضان", value=False, key="ramadan_mode")
 
         # زر التوليد
-        if not has_gemini:
-            st.error("❌ GEMINI_API_KEY مطلوب لتوليد الصور — أضفه في الإعدادات")
+        if not has_gemini and not _get_secrets().get("fal"):
+            st.error("❌ GEMINI_API_KEY أو FAL_API_KEY مطلوب لتوليد الصور — أضفه في الإعدادات")
         elif not selected_platforms:
             st.warning("⚠️ اختر منصة واحدة على الأقل")
         else:
             if st.button(
-                f"🚀 توليد {len(selected_platforms)} صورة الآن",
+                f"🚀 توليد {len(selected_platforms)} صورة الآن (متوازٍ ⚡)",
                 type="primary",
                 use_container_width=True,
                 key="generate_images_btn"
             ):
-                progress_bar = st.progress(0, text="⚡ جاري التوليد...")
-                status_text  = st.empty()
-
-                def update_progress(val, msg):
-                    progress_bar.progress(val, text=msg)
-                    status_text.markdown(f"<div style='color:#D4B870; font-size:0.85rem;'>{msg}</div>", unsafe_allow_html=True)
-
-                try:
-                    results = generate_platform_images(
-                        info=perfume_info,
-                        selected_platforms=selected_platforms,
-                        outfit=outfit,
-                        scene=scene,
-                        include_character=include_char,
-                        progress_callback=update_progress,
-                        ramadan_mode=ramadan_mode
-                    )
-                    st.session_state.generated_images = results
-                    st.session_state.gen_count = st.session_state.get("gen_count", 0) + len(selected_platforms)
-                    status_text.empty()
-                    st.success(f"✅ تم توليد {len([r for r in results.values() if r.get('bytes')])} صورة بنجاح!")
-                except Exception as e:
-                    st.error(f"❌ خطأ في التوليد: {e}")
+                with st.status(f"🎨 رسم {len(selected_platforms)} صور بشكل متوازٍ...", expanded=True) as gen_status:
+                    st.write("⚡ جاري تشغيل المولّدات المتوازية...")
+                    try:
+                        results = generate_concurrent_images(
+                            info=perfume_info,
+                            selected_platforms=selected_platforms,
+                            outfit=outfit,
+                            scene=scene,
+                            include_character=include_char,
+                            ramadan_mode=ramadan_mode,
+                        )
+                        st.session_state.generated_images = results
+                        st.session_state.gen_count = st.session_state.get("gen_count", 0) + len(selected_platforms)
+                        success_count = len([r for r in results.values() if r.get("bytes")])
+                        failed = [r for r in results.values() if not r.get("bytes") and r.get("error")]
+                        for f in failed:
+                            st.warning(f"⚠️ {f.get('label','')}: {f.get('error','')}")
+                        gen_status.update(
+                            label=f"✅ اكتمل التوليد — {success_count} صورة ناجحة!",
+                            state="complete"
+                        )
+                        st.toast(f"✅ {success_count} صورة جاهزة!", icon="🎉")
+                    except Exception as e:
+                        gen_status.update(label=f"❌ فشل التوليد", state="error")
+                        st.error(f"❌ خطأ في التوليد: {e}")
 
         # ─── زر المزامنة ───
         if "generated_images" in st.session_state:
@@ -1486,6 +1488,44 @@ def show_studio_page():
             with st.expander("📋 برومت Google Flow/Veo"):
                 st.markdown(f'<div class="flow-prompt">{sc.get("flow_prompt", "")}</div>', unsafe_allow_html=True)
                 st.code(sc.get("flow_prompt", ""), language="text")
+
+            # ─── تعليق صوتي ElevenLabs ───────────────────────────────────
+            st.markdown("---")
+            st.markdown("#### 🎙️ تعليق صوتي عربي خليجي (ElevenLabs)")
+            vo_text = " ".join(filter(None, [sc.get("hook", ""), sc.get("cta", "")]))
+            voice_text = st.text_area(
+                "نص التعليق الصوتي",
+                value=vo_text,
+                height=80,
+                key="voiceover_text",
+                help="يمكنك تعديل النص قبل التوليد"
+            )
+            if st.button("🎙️ توليد التعليق الصوتي", use_container_width=True, key="gen_voiceover"):
+                if not _get_secrets().get("elevenlabs"):
+                    st.error("❌ ELEVENLABS_API_KEY مطلوب — أضفه في الإعدادات")
+                elif not voice_text.strip():
+                    st.warning("⚠️ أدخل نص التعليق")
+                else:
+                    with st.status("🎙️ جاري التسجيل الصوتي...", expanded=True) as vo_status:
+                        try:
+                            audio_bytes = generate_voiceover_elevenlabs(voice_text.strip())
+                            st.session_state.voiceover_audio = audio_bytes
+                            vo_status.update(label="✅ التعليق الصوتي جاهز!", state="complete")
+                            st.toast("✅ التسجيل جاهز!", icon="🎙️")
+                        except Exception as e:
+                            vo_status.update(label="❌ فشل التسجيل", state="error")
+                            st.error(f"❌ خطأ ElevenLabs: {e}")
+
+            if "voiceover_audio" in st.session_state:
+                st.audio(st.session_state.voiceover_audio, format="audio/mp3")
+                st.download_button(
+                    "⬇️ تحميل التعليق الصوتي (MP3)",
+                    st.session_state.voiceover_audio,
+                    "voiceover.mp3",
+                    "audio/mpeg",
+                    use_container_width=True,
+                    key="dl_voiceover"
+                )
 
     # ════════════════════════════════════════════════════════════
     # TAB 6: المحتوى
