@@ -170,17 +170,18 @@ def render_sidebar():
 
         st.markdown("---")
 
-        # API Status Quick View
+              # API Status Quick View
         from modules.ai_engine import _get_secrets
         secrets = _get_secrets()
 
         st.markdown("<div style='color:#906030; font-size:0.75rem; font-weight:700; margin-bottom:0.4rem;'>حالة الاتصال</div>", unsafe_allow_html=True)
-api_list = [
-    ("Gemini + Imagen 3", secrets.get("gemini", ""), "🖼️"),
-    ("OpenRouter / Claude", secrets.get("openrouter", ""), "🤖"),
-    ("Luma Dream Machine", secrets.get("luma", ""), "🎬"),
-    ("RunwayML Gen-3", secrets.get("runway", ""), "🎥"),
-]
+
+        api_list = [
+            ("Gemini + Imagen 3", secrets.get("gemini", ""), "🖼️"),
+            ("OpenRouter / Claude", secrets.get("openrouter", ""), "🤖"),
+            ("Luma Dream Machine", secrets.get("luma", ""), "🎬"),
+            ("RunwayML Gen-3", secrets.get("runway", ""), "🎥"),
+        ]
 
         for name, key, icon in api_list:
             status = "🟢" if key else "🔴"
