@@ -27,13 +27,15 @@ def _get_secrets() -> dict:
         except Exception:
             return default
     return {
-        "fal":        _s("fal_key",        "FAL_API_KEY"),
-        "luma":       _s("luma_key",       "LUMA_API_KEY"),
-        "openrouter": _s("openrouter_key", "OPENROUTER_API_KEY"),
-        "kling":      _s("kling_key",      "KLING_API_KEY"),
-        "gemini":     _s("gemini_key",     "GEMINI_API_KEY"),
-        "runway":     _s("runway_key",     "RUNWAY_API_KEY"),
-        "webhook":    _s("webhook_url",    "MAKE_WEBHOOK_URL"),
+        "fal":        _s("fal_key",          "FAL_API_KEY"),
+        "luma":       _s("luma_key",         "LUMA_API_KEY"),
+        "openrouter": _s("openrouter_key",   "OPENROUTER_API_KEY"),
+        "kling":      _s("kling_key",        "KLING_API_KEY"),
+        "gemini":     _s("gemini_key",       "GEMINI_API_KEY"),
+        "runway":     _s("runway_key",       "RUNWAY_API_KEY"),
+        "webhook":    _s("webhook_url",      "MAKE_WEBHOOK_URL"),
+        "imgbb":      _s("imgbb_key",        "IMGBB_API_KEY"),
+        "elevenlabs": _s("elevenlabs_key",   "ELEVENLABS_API_KEY"),
     }
 
 
@@ -44,6 +46,52 @@ def load_asset_bytes(relative_path: str):
             return f.read()
     except Exception:
         return None
+
+
+def upload_image_imgbb(image_bytes: bytes, api_key: str) -> str:
+    """رفع صورة إلى ImgBB والحصول على رابط عام لاستخدامه مع Luma"""
+    b64 = base64.b64encode(image_bytes).decode()
+    r = requests.post(
+        IMGBB_API,
+        data={"key": api_key, "image": b64},
+        timeout=60,
+    )
+    r.raise_for_status()
+    return r.json()["data"]["url"]
+
+
+def generate_voiceover_elevenlabs(text: str,
+                                   voice_id: str = "EXAVITQu4vr4xnSDxMaL") -> bytes:
+    """توليد تعليق صوتي عربي خليجي فاخر عبر ElevenLabs (إرجاع bytes صوتية MP3).
+    voice_id الافتراضي: 'EXAVITQu4vr4xnSDxMaL' (صوت ذكر عربي — Rachel).
+    للبحث عن أصوات أخرى: https://api.elevenlabs.io/v1/voices
+    """
+    secrets = _get_secrets()
+    if not secrets.get("elevenlabs"):
+        raise ValueError("ELEVENLABS_API_KEY مفقود — أضفه في إعدادات API")
+    headers = {
+        "xi-api-key": secrets["elevenlabs"],
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+    }
+    payload = {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.50,
+            "similarity_boost": 0.75,
+            "style": 0.45,
+            "use_speaker_boost": True,
+        },
+    }
+    r = requests.post(
+        f"{ELEVENLABS_BASE}/text-to-speech/{voice_id}",
+        headers=headers,
+        json=payload,
+        timeout=90,
+    )
+    r.raise_for_status()
+    return r.content
 
 
 # ─── Model Endpoints ──────────────────────────────────────────────────────────
@@ -62,26 +110,23 @@ FAL_VIDEO_MODELS = {
 
 LUMA_BASE        = "https://api.lumalabs.ai/dream-machine/v1"
 LUMA_GENERATIONS = f"{LUMA_BASE}/generations"
+LUMA_MODEL       = "ray-2"
 
 GEMINI_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_VISION    = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
-GEMINI_IMAGEN    = f"{GEMINI_BASE}/imagen-3.0-generate-002:predict"
+GEMINI_IMAGEN    = f"{GEMINI_BASE}/imagen-3.0-generate-001:predict"
 
 RUNWAY_BASE      = "https://api.dev.runwayml.com/v1"
 RUNWAY_GEN3      = f"{RUNWAY_BASE}/image_to_video"
 
+IMGBB_API        = "https://api.imgbb.com/1/upload"
+ELEVENLABS_BASE  = "https://api.elevenlabs.io/v1"
+
 # ─── Platform Sizes ────────────────────────────────────────────────────────────
 PLATFORMS = {
-    "instagram_post":   {"w": 1080, "h": 1080, "label": "📸 Instagram Post",    "aspect": "1:1",  "emoji": "📸", "fal_ratio": "1:1"},
-    "instagram_story":  {"w": 1080, "h": 1920, "label": "📱 Instagram Story",   "aspect": "9:16", "emoji": "📱", "fal_ratio": "9:16"},
-    "tiktok":           {"w": 1080, "h": 1920, "label": "🎵 TikTok",            "aspect": "9:16", "emoji": "🎵", "fal_ratio": "9:16"},
-    "youtube_short":    {"w": 1080, "h": 1920, "label": "▶️ YouTube Short",     "aspect": "9:16", "emoji": "▶️", "fal_ratio": "9:16"},
-    "youtube_thumb":    {"w": 1280, "h": 720,  "label": "🎬 YouTube Thumbnail", "aspect": "16:9", "emoji": "🎬", "fal_ratio": "16:9"},
-    "twitter":          {"w": 1200, "h": 675,  "label": "🐦 Twitter/X",         "aspect": "16:9", "emoji": "🐦", "fal_ratio": "16:9"},
-    "facebook":         {"w": 1200, "h": 630,  "label": "👍 Facebook",          "aspect": "16:9", "emoji": "👍", "fal_ratio": "16:9"},
-    "snapchat":         {"w": 1080, "h": 1920, "label": "👻 Snapchat",          "aspect": "9:16", "emoji": "👻", "fal_ratio": "9:16"},
-    "linkedin":         {"w": 1200, "h": 627,  "label": "💼 LinkedIn",          "aspect": "16:9", "emoji": "💼", "fal_ratio": "16:9"},
-    "pinterest":        {"w": 1000, "h": 1500, "label": "📌 Pinterest",         "aspect": "2:3",  "emoji": "📌", "fal_ratio": "2:3"},
+    "post_1_1":   {"w": 1080, "h": 1080, "label": "📸 Square (1:1)",    "aspect": "1:1",  "emoji": "📸", "fal_ratio": "1:1"},
+    "story_9_16":  {"w": 1080, "h": 1920, "label": "📱 Portrait (9:16)",  "aspect": "9:16", "emoji": "📱", "fal_ratio": "9:16"},
+    "wide_16_9":   {"w": 1280, "h": 720,  "label": "🖥️ Landscape (16:9)", "aspect": "16:9", "emoji": "🎬", "fal_ratio": "16:9"},
 }
 
 # ─── Character DNA (ثبات الشخصية) ─────────────────────────────────────────────
@@ -657,11 +702,76 @@ def generate_three_mandatory_sizes(info: dict, outfit: str = "suit",
                                     ramadan_mode: bool = False,
                                     progress_callback=None) -> dict:
     """توليد 3 مقاسات إجبارية: 1:1 + 9:16 + 16:9"""
-    mandatory = ["instagram_post", "instagram_story", "twitter"]
+    mandatory = ["post_1_1", "story_9_16", "wide_16_9"]
     return generate_platform_images(
         info, mandatory, outfit, scene,
         include_character, progress_callback, ramadan_mode
     )
+
+
+# ─── Concurrent Image Generation ─────────────────────────────────────────────
+def generate_concurrent_images(info: dict, selected_platforms: list, outfit: str,
+                                scene: str, include_character: bool = True,
+                                ramadan_mode: bool = False) -> dict:
+    """توليد الصور بشكل متوازٍ باستخدام ThreadPoolExecutor لأسرع أداء"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _generate_one(plat_key: str) -> tuple:
+        plat = PLATFORMS[plat_key]
+        if ramadan_mode:
+            prompt = build_ramadan_product_prompt(info, plat["aspect"])
+        elif include_character:
+            prompt = build_mahwous_product_prompt(info, outfit, scene, plat["aspect"])
+        else:
+            prompt = build_product_only_prompt(info, plat["aspect"])
+        error_msg = None
+        try:
+            img_bytes = with_retry(
+                lambda: smart_generate_image(prompt, plat["aspect"], plat["w"], plat["h"]),
+                max_attempts=2
+            )
+        except Exception as e:
+            img_bytes = None
+            error_msg = str(e)
+        return plat_key, plat, prompt, img_bytes, error_msg
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=min(len(selected_platforms), 3)) as executor:
+        futures = {executor.submit(_generate_one, pk): pk for pk in selected_platforms}
+        for future in as_completed(futures):
+            plat_key, plat, prompt, img_bytes, err = future.result()
+            results[plat_key] = {
+                "bytes":   img_bytes,
+                "label":   plat["label"],
+                "emoji":   plat["emoji"],
+                "w":       plat["w"],
+                "h":       plat["h"],
+                "aspect":  plat["aspect"],
+                "prompt":  prompt,
+                "success": img_bytes is not None,
+                "error":   err,
+            }
+    return results
+
+
+def generate_concurrent_videos(prompt: str, duration: int = 5,
+                                image_url: str = None,
+                                image_bytes: bytes = None) -> dict:
+    """توليد فيديوين (9:16 و 16:9) بشكل متوازٍ من Luma"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _gen_video(aspect: str):
+        return aspect, generate_video_luma(
+            prompt, aspect, duration, image_url, image_bytes
+        )
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(_gen_video, ar): ar for ar in ["9:16", "16:9"]}
+        for future in futures:
+            aspect, result = future.result()
+            results[aspect] = result
+    return results
 
 
 # ─── Luma Dream Machine Video ─────────────────────────────────────────────────
@@ -688,22 +798,28 @@ def generate_video_luma(prompt: str, aspect_ratio: str = "9:16",
 
     payload = {
         "prompt": prompt,
+        "model": LUMA_MODEL,
         "aspect_ratio": ratio,
         "loop": loop,
     }
 
-    # إضافة صورة مرجعية إذا وُجدت (image_bytes أو image_url)
+    # إضافة صورة مرجعية إذا وُجدت — يجب أن تكون رابطاً عاماً (وليس base64)
     ref_url = image_url
     if image_bytes and not ref_url:
-        # رفع الصورة كـ base64 data URI
-        b64 = base64.b64encode(image_bytes).decode()
-        ref_url = f"data:image/jpeg;base64,{b64}"
+        # محاولة رفع الصورة إلى ImgBB للحصول على رابط عام
+        imgbb_key = secrets.get("imgbb", "")
+        if imgbb_key:
+            try:
+                ref_url = upload_image_imgbb(image_bytes, imgbb_key)
+            except Exception as imgbb_err:
+                ref_url = None  # تجاهل الصورة إذا فشل الرفع وتسجيل الخطأ
+                import sys; print(f"[ImgBB] فشل رفع الصورة: {imgbb_err}", file=sys.stderr)
 
     if ref_url:
         payload["keyframes"] = {
             "frame0": {
                 "type": "image",
-                "url": ref_url
+                "url": ref_url,
             }
         }
 
@@ -1199,10 +1315,9 @@ def build_make_payload(info: dict, image_urls: dict, video_url: str,
             "mood": info.get("mood", ""),
         },
         "images": {
-            "instagram_post_1x1": image_urls.get("instagram_post", ""),
-            "instagram_story_9x16": image_urls.get("instagram_story", ""),
-            "twitter_16x9": image_urls.get("twitter", ""),
-            "tiktok_9x16": image_urls.get("tiktok", ""),
+            "square_1x1": image_urls.get("post_1_1", ""),
+            "portrait_9x16": image_urls.get("story_9_16", ""),
+            "landscape_16x9": image_urls.get("wide_16_9", ""),
         },
         "video": {
             "url": video_url,
