@@ -11,8 +11,11 @@ import zipfile
 from datetime import datetime
 from PIL import Image
 
+from modules.supabase_db import save_perfume_to_supabase
+
 from modules.ai_engine import (
     analyze_perfume_image, generate_platform_images,
+    generate_concurrent_images,
     generate_all_captions, generate_descriptions,
     generate_hashtags, generate_scenario,
     generate_video_luma, check_luma_status, poll_luma_video,
@@ -21,7 +24,8 @@ from modules.ai_engine import (
     generate_image_gemini, smart_generate_image, generate_perfume_story,
     build_manual_info, build_video_prompt,
     send_to_make, build_make_payload,
-    generate_trend_insights,
+    generate_trend_insights, generate_voiceover_elevenlabs,
+    upload_image_imgbb,
     load_asset_bytes,
     PLATFORMS, MAHWOUS_OUTFITS, FAL_VIDEO_MODELS, _get_secrets
 )
@@ -1303,7 +1307,7 @@ def show_studio_page():
                     status_text.markdown(f"<div style='color:#D4B870; font-size:0.85rem;'>{msg}</div>", unsafe_allow_html=True)
 
                 try:
-                    results = generate_platform_images(
+                    results = generate_concurrent_images(
                         info=perfume_info,
                         selected_platforms=selected_platforms,
                         outfit=outfit,
@@ -1353,6 +1357,50 @@ def show_studio_page():
                             key=f"dl_{key}"
                         )
                     col_idx += 1
+
+            # ── أزرار الإجراءات السريعة ──────────────────────────
+            st.markdown("---")
+            qa1, qa2 = st.columns(2)
+            with qa1:
+                if st.button("🔗 Send to Make.com", use_container_width=True, key="quick_make"):
+                    _secrets = _get_secrets()
+                    if not _secrets.get("webhook"):
+                        st.warning("⚠️ أضف MAKE_WEBHOOK_URL في الإعدادات أولاً")
+                    else:
+                        with st.spinner("📤 جاري الإرسال إلى Make.com..."):
+                            image_urls = {}
+                            for k, d in results.items():
+                                if d.get("bytes"):
+                                    image_urls[k] = f"data:image/jpeg;base64,{base64.b64encode(d['bytes']).decode()}"
+                            captions = st.session_state.get("captions_data", {})
+                            payload = build_make_payload(perfume_info, image_urls,
+                                                          st.session_state.get("video_url_ready", ""), captions)
+                            res = send_to_make(payload)
+                        if res.get("success"):
+                            st.success("✅ تم الإرسال إلى Make.com بنجاح!")
+                        else:
+                            st.error(f"❌ فشل الإرسال: {res.get('error', '')}")
+            with qa2:
+                if st.button("🗄️ Save to Supabase", use_container_width=True, key="quick_supabase"):
+                    with st.spinner("🗄️ جاري الحفظ في Supabase..."):
+                        _secrets = _get_secrets()
+                        image_urls = {}
+                        for k, d in results.items():
+                            if d.get("bytes"):
+                                # رفع الصورة على ImgBB إذا كان المفتاح متاحاً
+                                if _secrets.get("imgbb"):
+                                    try:
+                                        image_urls[k] = upload_image_imgbb(d["bytes"])
+                                    except Exception:
+                                        image_urls[k] = ""
+                                else:
+                                    image_urls[k] = ""
+                        res = save_perfume_to_supabase(perfume_info, image_urls,
+                                                        st.session_state.get("video_url_ready", ""))
+                    if res.get("success"):
+                        st.success(f"✅ تم الحفظ في Supabase! ID: {res.get('id', '')}")
+                    else:
+                        st.error(f"❌ فشل الحفظ: {res.get('error', '')}")
 
     # ════════════════════════════════════════════════════════════
     # TAB 2: توليد الفيديو المباشر
@@ -1461,6 +1509,52 @@ def show_studio_page():
             with st.expander("📋 برومت Google Flow/Veo"):
                 st.markdown(f'<div class="flow-prompt">{sc.get("flow_prompt", "")}</div>', unsafe_allow_html=True)
                 st.code(sc.get("flow_prompt", ""), language="text")
+
+        # ── ElevenLabs Voiceover ─────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 🎙️ توليد تعليق صوتي (ElevenLabs)")
+        _secrets = _get_secrets()
+        if not _secrets.get("elevenlabs"):
+            st.info("💡 أضف ELEVENLABS_API_KEY في الإعدادات لتفعيل توليد الصوت")
+        else:
+            vo_text = st.text_area(
+                "نص التعليق الصوتي",
+                value=st.session_state.get("scenario_data", {}).get("hook", ""),
+                height=100,
+                key="voiceover_text",
+                placeholder="أدخل النص الذي تريد تحويله إلى صوت..."
+            )
+            vo_col1, vo_col2 = st.columns(2)
+            with vo_col1:
+                vo_stability = st.slider("الثبات", 0.0, 1.0, 0.5, 0.05, key="vo_stability")
+            with vo_col2:
+                vo_similarity = st.slider("التشابه", 0.0, 1.0, 0.75, 0.05, key="vo_similarity")
+
+            if st.button("🎙️ توليد الصوت", type="primary", use_container_width=True, key="gen_voiceover"):
+                if not vo_text.strip():
+                    st.warning("⚠️ أدخل النص أولاً")
+                else:
+                    with st.spinner("🎙️ جاري توليد الصوت..."):
+                        try:
+                            audio_bytes = generate_voiceover_elevenlabs(
+                                vo_text, stability=vo_stability,
+                                similarity_boost=vo_similarity
+                            )
+                            st.session_state.voiceover_audio = audio_bytes
+                            st.success("✅ تم توليد الصوت بنجاح!")
+                        except Exception as e:
+                            st.error(f"❌ فشل توليد الصوت: {e}")
+
+            if "voiceover_audio" in st.session_state:
+                st.audio(st.session_state.voiceover_audio, format="audio/mpeg")
+                st.download_button(
+                    "⬇️ تحميل الصوت (MP3)",
+                    st.session_state.voiceover_audio,
+                    "voiceover.mp3",
+                    "audio/mpeg",
+                    use_container_width=True,
+                    key="dl_voiceover"
+                )
 
     # ════════════════════════════════════════════════════════════
     # TAB 6: المحتوى

@@ -179,8 +179,11 @@ def render_sidebar():
         api_list = [
             ("Gemini + Imagen 3", secrets.get("gemini", ""), "🖼️"),
             ("OpenRouter / Claude", secrets.get("openrouter", ""), "🤖"),
+            ("Fal.ai (Flux)", secrets.get("fal", ""), "⚡"),
             ("Luma Dream Machine", secrets.get("luma", ""), "🎬"),
             ("RunwayML Gen-3", secrets.get("runway", ""), "🎥"),
+            ("ImgBB", secrets.get("imgbb", ""), "🖼️"),
+            ("ElevenLabs", secrets.get("elevenlabs", ""), "🎙️"),
         ]
 
         for name, key, icon in api_list:
@@ -205,7 +208,9 @@ def render_sidebar():
 
         # Clear session
         if st.button("🗑️ مسح الجلسة", use_container_width=True, key="clear_session"):
-            keys_to_keep = ["current_page", "openrouter_key", "gemini_key", "luma_key", "runway_key", "webhook_url"]
+            keys_to_keep = ["current_page", "openrouter_key", "gemini_key", "fal_key",
+                            "luma_key", "runway_key", "webhook_url",
+                            "imgbb_key", "elevenlabs_key", "supabase_url", "supabase_key"]
             for k in list(st.session_state.keys()):
                 if k not in keys_to_keep:
                     del st.session_state[k]
@@ -271,6 +276,31 @@ def show_settings_page():
                                 st.error(f"❌ خطأ {r.status_code}: {r.json().get('error', {}).get('message', '')}")
                         except Exception as e:
                             st.error(f"❌ فشل الاتصال: {e}")
+
+    # ── Fal.ai ──────────────────────────────────────────────────────────────
+    with st.expander("⚡ Fal.ai (توليد الصور — Flux Dev / بديل Gemini)"):
+        st.markdown("""
+        <div style='background:rgba(251,146,60,0.10); border:1.5px solid rgba(251,146,60,0.40);
+             border-radius:0.6rem; padding:0.8rem; margin-bottom:0.8rem; color:#FFD0A0; font-size:0.85rem;'>
+        <strong>🔑 كيف تحصل على المفتاح:</strong><br>
+        1. افتح <a href="https://fal.ai/dashboard/keys" target="_blank" style="color:#FFB870;">fal.ai/dashboard/keys</a><br>
+        2. انقر "Add key" → انسخ المفتاح<br>
+        3. المفتاح يبدأ بـ <code>key_id:key_secret</code>
+        </div>
+        """, unsafe_allow_html=True)
+
+        fal_key = st.text_input(
+            "FAL_API_KEY",
+            value=st.session_state.get("fal_key", ""),
+            type="password",
+            placeholder="key_id:key_secret",
+            key="fal_key_input",
+            help="يُستخدم لتوليد الصور بـ Flux Dev كبديل لـ Gemini Imagen"
+        )
+
+        if st.button("💾 حفظ مفتاح Fal.ai", use_container_width=True, key="save_fal"):
+            st.session_state.fal_key = fal_key
+            st.success("✅ تم حفظ مفتاح Fal.ai!")
 
     # ── OpenRouter ──────────────────────────────────────────────────────────
     with st.expander("🤖 OpenRouter / Claude 3.5 (توليد النصوص والتعليقات)"):
@@ -440,14 +470,101 @@ def show_settings_page():
             st.session_state.webhook_url = webhook_url
             st.success("✅ تم حفظ Webhook!")
 
+    # ── ImgBB ────────────────────────────────────────────────────────────────
+    with st.expander("🖼️ ImgBB (رفع الصور — اختياري)"):
+        st.markdown("""
+        <div style='background:rgba(99,179,237,0.10); border:1.5px solid rgba(99,179,237,0.40);
+             border-radius:0.6rem; padding:0.8rem; margin-bottom:0.8rem; color:#A0D8FF; font-size:0.85rem;'>
+        <strong>🔑 كيف تحصل على المفتاح:</strong><br>
+        1. افتح <a href="https://imgbb.com/login" target="_blank" style="color:#80C8FF;">imgbb.com</a><br>
+        2. اذهب إلى About → API → Get API key<br>
+        3. انسخ المفتاح
+        </div>
+        """, unsafe_allow_html=True)
+
+        imgbb_key = st.text_input(
+            "IMGBB_API_KEY",
+            value=st.session_state.get("imgbb_key", ""),
+            type="password",
+            placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            key="imgbb_key_input",
+            help="يُستخدم لرفع الصور على ImgBB للحصول على روابط عامة (مطلوب لـ Luma image-to-video)"
+        )
+
+        if st.button("💾 حفظ مفتاح ImgBB", use_container_width=True, key="save_imgbb"):
+            st.session_state.imgbb_key = imgbb_key
+            st.success("✅ تم حفظ مفتاح ImgBB!")
+
+    # ── ElevenLabs ───────────────────────────────────────────────────────────
+    with st.expander("🎙️ ElevenLabs (توليد الصوت — اختياري)"):
+        st.markdown("""
+        <div style='background:rgba(167,139,250,0.10); border:1.5px solid rgba(167,139,250,0.40);
+             border-radius:0.6rem; padding:0.8rem; margin-bottom:0.8rem; color:#D0C0FF; font-size:0.85rem;'>
+        <strong>🔑 كيف تحصل على المفتاح:</strong><br>
+        1. افتح <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" style="color:#C0B0FF;">elevenlabs.io</a><br>
+        2. انقر "Create API Key" → انسخ المفتاح
+        </div>
+        """, unsafe_allow_html=True)
+
+        elevenlabs_key = st.text_input(
+            "ELEVENLABS_API_KEY",
+            value=st.session_state.get("elevenlabs_key", ""),
+            type="password",
+            placeholder="sk_...",
+            key="elevenlabs_key_input",
+            help="يُستخدم لتوليد تعليقات صوتية بـ ElevenLabs"
+        )
+
+        if st.button("💾 حفظ مفتاح ElevenLabs", use_container_width=True, key="save_elevenlabs"):
+            st.session_state.elevenlabs_key = elevenlabs_key
+            st.success("✅ تم حفظ مفتاح ElevenLabs!")
+
+    # ── Supabase ─────────────────────────────────────────────────────────────
+    with st.expander("🗄️ Supabase (قاعدة البيانات — اختياري)"):
+        st.markdown("""
+        <div style='background:rgba(52,211,153,0.10); border:1.5px solid rgba(52,211,153,0.40);
+             border-radius:0.6rem; padding:0.8rem; margin-bottom:0.8rem; color:#A0FFD8; font-size:0.85rem;'>
+        <strong>🔑 كيف تحصل على البيانات:</strong><br>
+        1. افتح <a href="https://supabase.com/dashboard" target="_blank" style="color:#80FFD0;">supabase.com/dashboard</a><br>
+        2. اختر مشروعك → Settings → API<br>
+        3. انسخ <code>Project URL</code> و <code>anon public</code> key
+        </div>
+        """, unsafe_allow_html=True)
+
+        supabase_url = st.text_input(
+            "SUPABASE_URL",
+            value=st.session_state.get("supabase_url", ""),
+            placeholder="https://xxxxxxxxxxxx.supabase.co",
+            key="supabase_url_input",
+            help="رابط مشروع Supabase"
+        )
+        supabase_key = st.text_input(
+            "SUPABASE_API_KEY",
+            value=st.session_state.get("supabase_key", ""),
+            type="password",
+            placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            key="supabase_key_input",
+            help="مفتاح anon public من Supabase"
+        )
+
+        if st.button("💾 حفظ إعدادات Supabase", use_container_width=True, key="save_supabase"):
+            st.session_state.supabase_url = supabase_url
+            st.session_state.supabase_key = supabase_key
+            st.success("✅ تم حفظ إعدادات Supabase!")
+
     # ── حفظ الكل ────────────────────────────────────────────────────────────
     st.markdown("---")
     if st.button("💾 حفظ جميع الإعدادات", type="primary", use_container_width=True, key="save_all"):
         st.session_state.gemini_key     = st.session_state.get("gemini_key_input", "")
         st.session_state.openrouter_key = st.session_state.get("openrouter_key_input", "")
+        st.session_state.fal_key        = st.session_state.get("fal_key_input", "")
         st.session_state.luma_key       = st.session_state.get("luma_key_input", "")
         st.session_state.runway_key     = st.session_state.get("runway_key_input", "")
         st.session_state.webhook_url    = st.session_state.get("webhook_url_input", "")
+        st.session_state.imgbb_key      = st.session_state.get("imgbb_key_input", "")
+        st.session_state.elevenlabs_key = st.session_state.get("elevenlabs_key_input", "")
+        st.session_state.supabase_url   = st.session_state.get("supabase_url_input", "")
+        st.session_state.supabase_key   = st.session_state.get("supabase_key_input", "")
         st.success("✅ تم حفظ جميع الإعدادات بنجاح!")
         st.balloons()
 
@@ -463,11 +580,16 @@ def show_settings_page():
     # ── كيفية الحفظ الدائم ──────────────────────────────────────────────────
     with st.expander("📋 كيفية الحفظ الدائم (secrets.toml)"):
         st.code("""# .streamlit/secrets.toml
-GEMINI_API_KEY = "AIzaSy..."
-OPENROUTER_API_KEY = "sk-or-v1-..."
-LUMA_API_KEY = "luma-..."
-RUNWAY_API_KEY = "key_..."
-WEBHOOK_PUBLISH_CONTENT = "https://hook.eu1.make.com/..."
+GEMINI_API_KEY = "YOUR_API_KEY"
+OPENROUTER_API_KEY = "YOUR_API_KEY"
+FAL_API_KEY = "YOUR_API_KEY"
+LUMA_API_KEY = "YOUR_API_KEY"
+RUNWAY_API_KEY = "YOUR_API_KEY"
+MAKE_WEBHOOK_URL = "YOUR_WEBHOOK_URL"
+IMGBB_API_KEY = "YOUR_API_KEY"
+ELEVENLABS_API_KEY = "YOUR_API_KEY"
+SUPABASE_URL = "YOUR_SUPABASE_URL"
+SUPABASE_API_KEY = "YOUR_API_KEY"
 """, language="toml")
         st.markdown("""
         <div style='color:#D0B070; font-size:0.82rem;'>
