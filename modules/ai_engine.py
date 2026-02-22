@@ -79,10 +79,10 @@ PLATFORMS = {
 }
 
 # ─── Character DNA ─────────────────────────────────────────────────────────────
-MAHWOUS_DNA = """Photorealistic 3D animated character 'Mahwous' — Gulf Arab perfume expert:
-FACE (LOCK ALL): Black neatly styled hair swept forward. Short dark groomed beard. Warm expressive brown eyes with thick defined eyebrows. Golden-brown skin. Confident friendly expression.
-STYLE: Pixar/Disney premium 3D render quality. Cinematic depth of field. Professional 3-point lighting.
-CONSISTENCY: NEVER change any facial feature. SAME face every frame. Reference-locked character."""
+MAHWOUS_DNA = """Photorealistic 3D animated character 'Mahwous' — The ULTIMATE Gulf Arab perfume expert:
+FACE (STRICT LOCK): Black neatly styled hair swept forward with high precision. Short dark groomed beard with consistent density. Warm expressive brown eyes, thick defined eyebrows. Golden-brown skin tone. Confident, friendly, and charismatic expression.
+STYLE: Ultra-premium 3D render (Pixar/Disney 2026 quality). Cinematic depth of field. Professional 3-point lighting.
+IDENTITY: ZERO VARIATION in facial features. He must look exactly like the reference character in every generation. Same nose, same jawline, same eyes. High-fidelity facial geometry."""
 
 MAHWOUS_OUTFITS = {
     "suit":   "wearing elegant black luxury suit with gold embroidery on lapels, crisp white dress shirt, gold silk tie, gold pocket square — ultra-luxury formal look",
@@ -564,15 +564,22 @@ def build_mahwous_product_prompt(info: dict, outfit: str = "suit",
 Outfit: {outfit_desc}
 Setting: {scene_desc}
 
-He cradles the perfume bottle reverently with both hands at chest height:
+ACTION: He holds the perfume bottle with extreme reverence, showcasing it clearly to the camera.
 — Product: {product_name} by {brand}
-— Bottle: {bottle_shape}. Cap: {bottle_cap}. Colors: {colors}. Label: {label}.
+— Bottle: {bottle_shape}.
+— Cap: {bottle_cap}.
+— Colors: {colors}.
+— Label: {label}.
 {f"— Distinctive: {uniqueness}" if uniqueness else ""}
 
-CRITICAL BOTTLE RULE: The bottle must be 100% photorealistic, matching the original design exactly. NO distortion, NO simplification, NO invented details.
+ABSOLUTE BOTTLE FIDELITY: The perfume bottle MUST be an EXACT replica of the real product. 
+- DO NOT change the shape, proportions, or label typography. 
+- NO AI-generated 'creative' variations. 
+- It must look like a real photograph of the bottle placed within the 3D scene.
+- Every detail from the reference image must be preserved with 100% accuracy.
 
 Expression: warm expert confidence, slight knowing smile, eyes engaging camera.
-Composition: subject centered, slight 3/4 angle, negative space around bottle.
+Composition: subject centered, cinematic framing, focus sharply on both Mahwous and the bottle.
 Aspect ratio: {platform_aspect}.
 {QUALITY}"""
 
