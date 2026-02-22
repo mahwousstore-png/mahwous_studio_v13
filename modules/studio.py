@@ -21,6 +21,7 @@ from modules.ai_engine import (
     generate_image_gemini, smart_generate_image, generate_perfume_story,
     build_manual_info, build_video_prompt,
     send_to_make, build_make_payload,
+    generate_trend_insights,
     load_asset_bytes,
     PLATFORMS, MAHWOUS_OUTFITS, FAL_VIDEO_MODELS, _get_secrets
 )
@@ -723,6 +724,298 @@ def _show_single_image_tab(perfume_info: dict):
             )
 
 
+# ─── Smart Trends Panel ───────────────────────────────────────────────────────
+def _show_smart_trends_panel(perfume_info: dict):
+    """لوحة ترندات ذكية مدمجة — تظهر تلقائياً بعد تحديد المنتج"""
+    product_key = f"trends_{perfume_info.get('product_name','')}"
+
+    # تحقق هل يوجد ترند محفوظ لهذا المنتج
+    cached = st.session_state.get(product_key)
+
+    header_col, btn_col = st.columns([3, 1])
+    with header_col:
+        st.markdown("""
+        <div style='display:flex; align-items:center; gap:0.6rem; margin-bottom:0.4rem;'>
+          <span style='font-size:1.4rem;'>🔥</span>
+          <span style='color:#FFE060; font-size:1rem; font-weight:900;'>ترندات ذكية مقترحة</span>
+          <span style='color:#906030; font-size:0.8rem;'> — بناءً على هذا المنتج</span>
+        </div>
+        """, unsafe_allow_html=True)
+    with btn_col:
+        refresh = st.button(
+            "⚡ تحليل" if not cached else "🔄 تحديث",
+            key=f"refresh_trends_{product_key}",
+            use_container_width=True,
+            help="تحليل ترندات المنتج بالذكاء الاصطناعي"
+        )
+
+    if refresh or not cached:
+        with st.spinner("🔍 جاري تحليل الترندات..."):
+            try:
+                data = generate_trend_insights(perfume_info)
+                st.session_state[product_key] = data
+                cached = data
+            except Exception as e:
+                st.warning(f"⚠️ تعذّر تحليل الترندات: {e}")
+                return
+
+    if not cached or "error" in cached:
+        if cached and "error" in cached:
+            st.caption(f"⚠️ {cached['error']}")
+        return
+
+    # ── عرض مضغوط ──
+    if cached.get("product_summary"):
+        st.markdown(
+            f"<div style='background:rgba(212,175,55,0.08); border-right:3px solid #F0CC55; "
+            f"padding:0.5rem 0.8rem; border-radius:0 0.4rem 0.4rem 0; color:#FFE8A0; "
+            f"font-size:0.88rem; margin-bottom:0.6rem;'>💡 {cached['product_summary']}</div>",
+            unsafe_allow_html=True
+        )
+
+    # أبرز 3 ترندات
+    topics = cached.get("trending_topics", [])[:3]
+    if topics:
+        cols = st.columns(len(topics))
+        platform_colors = {"TikTok": "#FF2D55", "Instagram": "#C13584", "Twitter": "#1DA1F2"}
+        for col, t in zip(cols, topics):
+            with col:
+                plat = t.get("platform", "")
+                color = platform_colors.get(plat, "#A090D0")
+                st.markdown(f"""
+                <div style='background:#1A1206; border:1.5px solid rgba(212,175,55,0.25);
+                     border-radius:0.6rem; padding:0.7rem; height:100%;'>
+                  <div style='color:{color}; font-size:0.72rem; font-weight:900; margin-bottom:0.3rem;'>
+                    {plat}
+                  </div>
+                  <div style='color:#FFE060; font-size:0.85rem; font-weight:800;'>{t.get('topic','')}</div>
+                  <div style='color:#A09070; font-size:0.75rem; margin-top:0.3rem; line-height:1.4;'>
+                    {t.get('hook','')[:80]}
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    # أبرز هوكين
+    hooks = cached.get("viral_hooks", [])[:2]
+    if hooks:
+        st.markdown("<div style='margin-top:0.5rem;'>", unsafe_allow_html=True)
+        for h in hooks:
+            st.markdown(
+                f"<div style='background:rgba(255,60,60,0.08); border:1px solid rgba(255,60,60,0.30); "
+                f"border-radius:0.5rem; padding:0.4rem 0.8rem; color:#FFB8B8; font-size:0.82rem; "
+                f"margin-bottom:0.3rem;'>🎯 {h}</div>",
+                unsafe_allow_html=True
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.caption("💡 انتقل إلى تبويب 🔥 ترند ذكي للتفاصيل الكاملة")
+
+
+def _show_trends_tab(perfume_info: dict):
+    """تبويب الترندات الذكية الكامل"""
+    st.markdown("""
+    <div class="video-card">
+      <h3>🔥 ترند ذكي</h3>
+      <div style='color:#A090D0; font-size:0.85rem;'>
+        تحليل المنتج واقتراح مواضيع ترند فيروسية · هوكات صادمة · زوايا محتوى جديدة
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    product_key = f"trends_{perfume_info.get('product_name','')}"
+    cached = st.session_state.get(product_key)
+
+    btn_col1, btn_col2 = st.columns([2, 1])
+    with btn_col1:
+        if st.button("🔥 تحليل الترندات الآن", type="primary", use_container_width=True, key="trends_full_btn"):
+            with st.spinner("🔍 يحلل الذكاء الاصطناعي المنتج ويبحث عن الترندات..."):
+                try:
+                    data = generate_trend_insights(perfume_info)
+                    st.session_state[product_key] = data
+                    cached = data
+                    st.session_state.gen_count = st.session_state.get("gen_count", 0) + 1
+                except Exception as e:
+                    st.error(f"❌ خطأ في التحليل: {e}")
+    with btn_col2:
+        if cached and st.button("🗑️ مسح", use_container_width=True, key="trends_clear_btn"):
+            st.session_state.pop(product_key, None)
+            st.rerun()
+
+    if not cached:
+        st.info("💡 انقر 'تحليل الترندات الآن' لتحليل المنتج وإيجاد أفضل المواضيع الرائجة")
+        return
+
+    if "error" in cached:
+        st.error(cached["error"])
+        return
+
+    # ── ملخص المنتج والجمهور ───────────────────────────────────────
+    if cached.get("product_summary") or cached.get("target_audience"):
+        st.markdown("#### 🎯 تشخيص المنتج")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"""
+            <div style='background:rgba(212,175,55,0.08); border:1.5px solid rgba(212,175,55,0.35);
+                 border-radius:0.7rem; padding:1rem;'>
+              <div style='color:#F5D060; font-weight:900; font-size:0.85rem; margin-bottom:0.4rem;'>
+                💡 هوية العطر
+              </div>
+              <div style='color:#E8D5A0; font-size:0.9rem; line-height:1.6;'>
+                {cached.get('product_summary','—')}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"""
+            <div style='background:rgba(60,120,255,0.08); border:1.5px solid rgba(60,120,255,0.30);
+                 border-radius:0.7rem; padding:1rem;'>
+              <div style='color:#A0C0FF; font-weight:900; font-size:0.85rem; margin-bottom:0.4rem;'>
+                👥 الجمهور المستهدف
+              </div>
+              <div style='color:#C0D8FF; font-size:0.9rem; line-height:1.6;'>
+                {cached.get('target_audience','—')}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── المواضيع الترند ───────────────────────────────────────────
+    topics = cached.get("trending_topics", [])
+    if topics:
+        st.markdown("#### 🔥 المواضيع الرائجة المقترحة")
+        platform_colors = {"TikTok": "#FF2D55", "Instagram": "#C13584", "Twitter": "#1DA1F2"}
+        for t in topics:
+            plat = t.get("platform", "")
+            color = platform_colors.get(plat, "#A090D0")
+            st.markdown(f"""
+            <div style='background:#1A1206; border:1.5px solid rgba(212,175,55,0.25);
+                 border-left:4px solid {color}; border-radius:0 0.6rem 0.6rem 0;
+                 padding:0.9rem 1rem; margin-bottom:0.7rem;'>
+              <div style='display:flex; justify-content:space-between; align-items:flex-start;'>
+                <div>
+                  <span style='color:{color}; font-size:0.75rem; font-weight:900;'>{plat}</span>
+                  <span style='color:#FFE060; font-size:1rem; font-weight:900; margin-right:0.5rem;'>
+                    {t.get('topic','')}
+                  </span>
+                </div>
+              </div>
+              <div style='color:#A09070; font-size:0.82rem; margin-top:0.4rem;'>
+                🔗 {t.get('relevance','')}
+              </div>
+              <div style='background:rgba(255,60,60,0.10); border:1px solid rgba(255,60,60,0.25);
+                   border-radius:0.4rem; padding:0.4rem 0.7rem; margin-top:0.5rem;
+                   color:#FFB8B8; font-size:0.85rem;'>
+                🎯 الهوك: {t.get('hook','')}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ── هوكات فيروسية ─────────────────────────────────────────────
+    hooks = cached.get("viral_hooks", [])
+    if hooks:
+        st.markdown("#### 💥 هوكات فيروسية جاهزة")
+        for i, h in enumerate(hooks, 1):
+            st.markdown(f"""
+            <div style='background:rgba(255,60,60,0.08); border:1.5px solid rgba(255,60,60,0.35);
+                 border-radius:0.6rem; padding:0.7rem 1rem; margin-bottom:0.5rem;
+                 color:#FFD0D0; font-size:0.92rem; font-weight:800;'>
+              {i}. {h}
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ── زوايا المحتوى ─────────────────────────────────────────────
+    angles = cached.get("content_angles", [])
+    if angles:
+        st.markdown("#### 🎬 زوايا محتوى جديدة")
+        ac1, ac2 = st.columns(2)
+        for i, a in enumerate(angles):
+            with (ac1 if i % 2 == 0 else ac2):
+                fmt = a.get("format", "")
+                fmt_color = "#FF2D55" if "ريلز" in fmt else "#C13584" if "بوست" in fmt else "#1DA1F2"
+                st.markdown(f"""
+                <div style='background:#1A1206; border:1.5px solid rgba(212,175,55,0.20);
+                     border-radius:0.6rem; padding:0.8rem; margin-bottom:0.6rem; height:100%;'>
+                  <div style='display:flex; justify-content:space-between; margin-bottom:0.4rem;'>
+                    <span style='color:#FFE060; font-weight:900; font-size:0.88rem;'>
+                      {a.get('angle','')}
+                    </span>
+                    <span style='color:{fmt_color}; font-size:0.75rem; font-weight:800;
+                         background:rgba(255,255,255,0.06); padding:0.1rem 0.5rem;
+                         border-radius:999px;'>{fmt}</span>
+                  </div>
+                  <div style='color:#C0A870; font-size:0.82rem; line-height:1.5;'>
+                    {a.get('description','')}
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    # ── الهاشتاقات الرائجة ────────────────────────────────────────
+    t_tags = cached.get("trending_hashtags", {})
+    if t_tags:
+        st.markdown("#### #️⃣ الهاشتاقات الرائجة المقترحة")
+        th1, th2 = st.columns(2)
+        with th1:
+            viral = t_tags.get("viral", [])
+            if viral:
+                st.markdown("**🔥 فيروسية**")
+                st.markdown(
+                    " ".join(f"<span class='hashtag-pill'>{h}</span>" for h in viral),
+                    unsafe_allow_html=True
+                )
+            niche = t_tags.get("niche", [])
+            if niche:
+                st.markdown("**🎯 متخصصة**")
+                st.markdown(
+                    " ".join(f"<span class='hashtag-pill'>{h}</span>" for h in niche),
+                    unsafe_allow_html=True
+                )
+        with th2:
+            buying = t_tags.get("buying", [])
+            if buying:
+                st.markdown("**🛍️ شرائية**")
+                st.markdown(
+                    " ".join(f"<span class='hashtag-pill'>{h}</span>" for h in buying),
+                    unsafe_allow_html=True
+                )
+
+    # ── أوقات النشر وفرص إضافية ───────────────────────────────────
+    times = cached.get("best_post_times", {})
+    gap   = cached.get("competitor_gap", "")
+    season = cached.get("seasonal_angle", "")
+
+    if times or gap or season:
+        st.markdown("---")
+        bt1, bt2, bt3 = st.columns(3)
+        if times:
+            with bt1:
+                st.markdown("#### 🕐 أفضل أوقات النشر")
+                for plat, t in times.items():
+                    st.markdown(
+                        f"<div style='color:#D4B870; font-size:0.83rem; margin-bottom:0.3rem;'>"
+                        f"<strong>{plat}:</strong> {t}</div>",
+                        unsafe_allow_html=True
+                    )
+        if gap:
+            with bt2:
+                st.markdown("#### 💎 فرصة غير مستغلة")
+                st.markdown(
+                    f"<div style='background:rgba(80,200,80,0.08); border:1.5px solid rgba(80,200,80,0.30); "
+                    f"border-radius:0.6rem; padding:0.8rem; color:#A0EFA0; font-size:0.85rem; "
+                    f"line-height:1.5;'>{gap}</div>",
+                    unsafe_allow_html=True
+                )
+        if season:
+            with bt3:
+                st.markdown("#### 📅 الزاوية الموسمية")
+                st.markdown(
+                    f"<div style='background:rgba(255,200,50,0.08); border:1.5px solid rgba(255,200,50,0.30); "
+                    f"border-radius:0.6rem; padding:0.8rem; color:#FFE8A0; font-size:0.85rem; "
+                    f"line-height:1.5;'>{season}</div>",
+                    unsafe_allow_html=True
+                )
+
+
 # ─── Main Studio Page ──────────────────────────────────────────────────────────
 def show_studio_page():
     st.markdown(STUDIO_CSS, unsafe_allow_html=True)
@@ -931,8 +1224,13 @@ def show_studio_page():
 
     st.markdown("---")
 
+    # ─── Smart Trends: Auto-trigger after product is known ───────────────────
+    _show_smart_trends_panel(perfume_info)
+
+    st.markdown("---")
+
     # ─── Main Tabs ───────────────────────────────────────────────────────────
-    tab_images, tab_video, tab_single, tab_captions, tab_scenario, tab_content, tab_publish = st.tabs([
+    tab_images, tab_video, tab_single, tab_captions, tab_scenario, tab_content, tab_publish, tab_trends = st.tabs([
         "🖼️ توليد الصور",
         "🎬 توليد الفيديو",
         "🎨 صورة مخصصة",
@@ -940,6 +1238,7 @@ def show_studio_page():
         "🎭 السيناريو",
         "📝 المحتوى",
         "📤 نشر",
+        "🔥 ترند ذكي",
     ])
 
     # ════════════════════════════════════════════════════════════
@@ -1382,3 +1681,9 @@ def show_studio_page():
                         "error":     result.get("error", "خطأ غير معروف"),
                     }
                 st.rerun()
+
+    # ════════════════════════════════════════════════════════════
+    # TAB 8: ترند ذكي
+    # ════════════════════════════════════════════════════════════
+    with tab_trends:
+        _show_trends_tab(perfume_info)

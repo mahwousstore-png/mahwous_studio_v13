@@ -1100,6 +1100,68 @@ def generate_perfume_story(info: dict) -> str:
     return smart_generate_text(prompt, temperature=0.9)
 
 
+# ─── Smart Trend Insights ─────────────────────────────────────────────────────
+def generate_trend_insights(info: dict) -> dict:
+    """تحليل ذكي للترندات والمواضيع الرائجة المتعلقة بالمنتج"""
+    product_name = info.get("product_name", "عطر فاخر")
+    brand        = info.get("brand", "علامة مميزة")
+    gender       = info.get("gender", "unisex")
+    style        = info.get("style", "luxury")
+    mood         = info.get("mood", "فاخر وغامض")
+    notes        = info.get("notes_guess", "عود وعنبر")
+    perfume_type = info.get("type", "EDP")
+
+    system = """أنت خبير تسويق رقمي متخصص في العطور الفاخرة في السوق الخليجي.
+لديك معرفة عميقة بالترندات الحالية على TikTok وInstagram وTwitter في السعودية والخليج.
+مهمتك: تحليل المنتج واقتراح مواضيع ترند ذكية وأفكار محتوى فيروسي."""
+
+    prompt = f"""المنتج: {product_name} من {brand}
+النوع: {perfume_type} | الجنس: {gender} | الطابع: {style}
+المزاج: {mood} | الملاحظات: {notes}
+
+بناءً على هذا العطر، حلّل وأجب بـ JSON صرف فقط:
+{{
+  "product_summary": "جملة واحدة تصف هوية العطر بدقة",
+  "target_audience": "الجمهور المستهدف الأمثل (عمر، اهتمامات، منصة)",
+  "trending_topics": [
+    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}},
+    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}},
+    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}},
+    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}},
+    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}}
+  ],
+  "viral_hooks": [
+    "هوك صادم للثانية الأولى #1",
+    "هوك صادم للثانية الأولى #2",
+    "هوك صادم للثانية الأولى #3"
+  ],
+  "content_angles": [
+    {{"angle": "زاوية المحتوى", "format": "ريلز/بوست/ستوري", "description": "وصف الفكرة في جملتين"}},
+    {{"angle": "زاوية المحتوى", "format": "ريلز/بوست/ستوري", "description": "وصف الفكرة في جملتين"}},
+    {{"angle": "زاوية المحتوى", "format": "ريلز/بوست/ستوري", "description": "وصف الفكرة في جملتين"}},
+    {{"angle": "زاوية المحتوى", "format": "ريلز/بوست/ستوري", "description": "وصف الفكرة في جملتين"}}
+  ],
+  "trending_hashtags": {{
+    "viral":   ["أكثر 8 هاشتاقات ترند الآن مرتبطة بالعطر"],
+    "niche":   ["8 هاشتاقات متخصصة عالية الجودة"],
+    "buying":  ["8 هاشتاقات شرائية مستهدفة لمحبي العطور الفاخرة في الخليج"]
+  }},
+  "best_post_times": {{
+    "instagram": "أفضل وقت نشر على إنستجرام (المنطقة العربية)",
+    "tiktok":    "أفضل وقت نشر على تيك توك",
+    "twitter":   "أفضل وقت نشر على تويتر"
+  }},
+  "competitor_gap": "فرصة تسويقية غير مستغلة لهذا العطر تحديداً",
+  "seasonal_angle": "زاوية موسمية أو مناسبة مرتبطة بالوقت الحالي"
+}}"""
+
+    text = smart_generate_text(prompt, system, temperature=0.75)
+    try:
+        return clean_json(text)
+    except Exception as e:
+        return {"error": f"فشل تحليل الترندات: {e}"}
+
+
 # ─── Make.com Webhook Integration ─────────────────────────────────────────────
 def send_to_make(payload: dict) -> dict:
     """إرسال البيانات إلى Make.com Webhook للنشر التلقائي"""
