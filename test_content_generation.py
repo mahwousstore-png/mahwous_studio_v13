@@ -64,22 +64,22 @@ print("📸 بناء برومتات الصور (3 مقاسات)")
 print("─" * 50)
 
 prompts = {
-    "instagram_post": {
-        "platform": PLATFORMS["instagram_post"],
+    "post_1_1": {
+        "platform": PLATFORMS["post_1_1"],
         "prompt": build_mahwous_product_prompt(info, outfit="suit", scene="store", platform_aspect="1:1"),
         "size": "1080x1080",
         "ratio": "1:1",
     },
-    "instagram_story": {
-        "platform": PLATFORMS["instagram_story"],
+    "story_9_16": {
+        "platform": PLATFORMS["story_9_16"],
         "prompt": build_mahwous_product_prompt(info, outfit="suit", scene="studio", platform_aspect="9:16"),
         "size": "1080x1920",
         "ratio": "9:16",
     },
-    "twitter": {
-        "platform": PLATFORMS["twitter"],
+    "wide_16_9": {
+        "platform": PLATFORMS["wide_16_9"],
         "prompt": build_mahwous_product_prompt(info, outfit="suit", scene="rooftop", platform_aspect="16:9"),
-        "size": "1200x675",
+        "size": "1280x720",
         "ratio": "16:9",
     },
 }

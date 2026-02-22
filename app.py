@@ -181,6 +181,9 @@ def render_sidebar():
             ("OpenRouter / Claude", secrets.get("openrouter", ""), "🤖"),
             ("Luma Dream Machine", secrets.get("luma", ""), "🎬"),
             ("RunwayML Gen-3", secrets.get("runway", ""), "🎥"),
+            ("Fal.ai", secrets.get("fal", ""), "⚡"),
+            ("ImgBB", secrets.get("imgbb", ""), "🖼"),
+            ("ElevenLabs", secrets.get("elevenlabs", ""), "🎙️"),
         ]
 
         for name, key, icon in api_list:
@@ -205,7 +208,9 @@ def render_sidebar():
 
         # Clear session
         if st.button("🗑️ مسح الجلسة", use_container_width=True, key="clear_session"):
-            keys_to_keep = ["current_page", "openrouter_key", "gemini_key", "luma_key", "runway_key", "webhook_url"]
+            keys_to_keep = ["current_page", "openrouter_key", "gemini_key", "luma_key", "runway_key",
+                            "webhook_url", "fal_key", "imgbb_key", "elevenlabs_key",
+                            "supabase_url", "supabase_key"]
             for k in list(st.session_state.keys()):
                 if k not in keys_to_keep:
                     del st.session_state[k]
@@ -440,14 +445,78 @@ def show_settings_page():
             st.session_state.webhook_url = webhook_url
             st.success("✅ تم حفظ Webhook!")
 
+    # ── Fal.ai ───────────────────────────────────────────────────────────────
+    with st.expander("⚡ Fal.ai (توليد الصور — Flux LoRA)"):
+        fal_key = st.text_input(
+            "FAL_API_KEY",
+            value=st.session_state.get("fal_key", ""),
+            type="password",
+            placeholder="YOUR_KEY",
+            key="fal_key_input"
+        )
+        if st.button("💾 حفظ مفتاح Fal.ai", use_container_width=True, key="save_fal"):
+            st.session_state.fal_key = fal_key
+            st.success("✅ تم حفظ مفتاح Fal.ai!")
+
+    # ── ImgBB ────────────────────────────────────────────────────────────────
+    with st.expander("🖼 ImgBB (رفع الصور للحصول على روابط مباشرة)"):
+        imgbb_key = st.text_input(
+            "IMGBB_API_KEY",
+            value=st.session_state.get("imgbb_key", ""),
+            type="password",
+            placeholder="YOUR_KEY",
+            key="imgbb_key_input"
+        )
+        if st.button("💾 حفظ مفتاح ImgBB", use_container_width=True, key="save_imgbb"):
+            st.session_state.imgbb_key = imgbb_key
+            st.success("✅ تم حفظ مفتاح ImgBB!")
+
+    # ── ElevenLabs ───────────────────────────────────────────────────────────
+    with st.expander("🎙️ ElevenLabs (تعليق صوتي للفيديوهات)"):
+        elevenlabs_key = st.text_input(
+            "ELEVENLABS_API_KEY",
+            value=st.session_state.get("elevenlabs_key", ""),
+            type="password",
+            placeholder="YOUR_KEY",
+            key="elevenlabs_key_input"
+        )
+        if st.button("💾 حفظ مفتاح ElevenLabs", use_container_width=True, key="save_elevenlabs"):
+            st.session_state.elevenlabs_key = elevenlabs_key
+            st.success("✅ تم حفظ مفتاح ElevenLabs!")
+
+    # ── Supabase ─────────────────────────────────────────────────────────────
+    with st.expander("🗄️ Supabase (قاعدة بيانات العطور)"):
+        supabase_url = st.text_input(
+            "SUPABASE_URL",
+            value=st.session_state.get("supabase_url", ""),
+            placeholder="https://your-project.supabase.co",
+            key="supabase_url_input"
+        )
+        supabase_key = st.text_input(
+            "SUPABASE_KEY",
+            value=st.session_state.get("supabase_key", ""),
+            type="password",
+            placeholder="YOUR_KEY",
+            key="supabase_key_input"
+        )
+        if st.button("💾 حفظ إعدادات Supabase", use_container_width=True, key="save_supabase"):
+            st.session_state.supabase_url = supabase_url
+            st.session_state.supabase_key = supabase_key
+            st.success("✅ تم حفظ إعدادات Supabase!")
+
     # ── حفظ الكل ────────────────────────────────────────────────────────────
     st.markdown("---")
     if st.button("💾 حفظ جميع الإعدادات", type="primary", use_container_width=True, key="save_all"):
-        st.session_state.gemini_key     = st.session_state.get("gemini_key_input", "")
-        st.session_state.openrouter_key = st.session_state.get("openrouter_key_input", "")
-        st.session_state.luma_key       = st.session_state.get("luma_key_input", "")
-        st.session_state.runway_key     = st.session_state.get("runway_key_input", "")
-        st.session_state.webhook_url    = st.session_state.get("webhook_url_input", "")
+        st.session_state.gemini_key      = st.session_state.get("gemini_key_input", "")
+        st.session_state.openrouter_key  = st.session_state.get("openrouter_key_input", "")
+        st.session_state.luma_key        = st.session_state.get("luma_key_input", "")
+        st.session_state.runway_key      = st.session_state.get("runway_key_input", "")
+        st.session_state.webhook_url     = st.session_state.get("webhook_url_input", "")
+        st.session_state.fal_key         = st.session_state.get("fal_key_input", "")
+        st.session_state.imgbb_key       = st.session_state.get("imgbb_key_input", "")
+        st.session_state.elevenlabs_key  = st.session_state.get("elevenlabs_key_input", "")
+        st.session_state.supabase_url    = st.session_state.get("supabase_url_input", "")
+        st.session_state.supabase_key    = st.session_state.get("supabase_key_input", "")
         st.success("✅ تم حفظ جميع الإعدادات بنجاح!")
         st.balloons()
 
@@ -463,11 +532,16 @@ def show_settings_page():
     # ── كيفية الحفظ الدائم ──────────────────────────────────────────────────
     with st.expander("📋 كيفية الحفظ الدائم (secrets.toml)"):
         st.code("""# .streamlit/secrets.toml
-GEMINI_API_KEY = "AIzaSy..."
-OPENROUTER_API_KEY = "sk-or-v1-..."
-LUMA_API_KEY = "luma-..."
-RUNWAY_API_KEY = "key_..."
-WEBHOOK_PUBLISH_CONTENT = "https://hook.eu1.make.com/..."
+GEMINI_API_KEY = "YOUR_KEY"
+OPENROUTER_API_KEY = "YOUR_KEY"
+LUMA_API_KEY = "YOUR_KEY"
+RUNWAY_API_KEY = "YOUR_KEY"
+FAL_API_KEY = "YOUR_KEY"
+IMGBB_API_KEY = "YOUR_KEY"
+ELEVENLABS_API_KEY = "YOUR_KEY"
+MAKE_WEBHOOK_URL = "YOUR_KEY"
+SUPABASE_URL = "YOUR_KEY"
+SUPABASE_KEY = "YOUR_KEY"
 """, language="toml")
         st.markdown("""
         <div style='color:#D0B070; font-size:0.82rem;'>

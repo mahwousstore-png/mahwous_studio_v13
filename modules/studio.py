@@ -23,6 +23,7 @@ from modules.ai_engine import (
     send_to_make, build_make_payload,
     generate_trend_insights,
     load_asset_bytes,
+    generate_concurrent_images, generate_voiceover_elevenlabs,
     PLATFORMS, MAHWOUS_OUTFITS, FAL_VIDEO_MODELS, _get_secrets
 )
 
@@ -229,16 +230,9 @@ def _info_card(info: dict):
 # ─── Platform Selector ────────────────────────────────────────────────────────
 def platform_selector() -> list:
     if "selected_platforms" not in st.session_state:
-        st.session_state.selected_platforms = ["instagram_post", "instagram_story", "tiktok", "twitter"]
+        st.session_state.selected_platforms = list(PLATFORMS.keys())
 
-    groups = {
-        "📱 عمودي 9:16 — قصص وريلز": ["instagram_story", "tiktok", "youtube_short", "snapchat"],
-        "🖼️ مربع 1:1 — منشور إنستجرام": ["instagram_post"],
-        "🖥️ أفقي 16:9 — يوتيوب وتويتر": ["twitter", "youtube_thumb", "facebook", "linkedin"],
-        "📌 رأسي 2:3 — بينتريست": ["pinterest"],
-    }
-
-    c1, c2, c3 = st.columns([1, 1, 2])
+    c1, c2 = st.columns(2)
     if c1.button("✅ تحديد الكل", use_container_width=True, key="sel_all"):
         st.session_state.selected_platforms = list(PLATFORMS.keys())
         st.rerun()
@@ -246,24 +240,22 @@ def platform_selector() -> list:
         st.session_state.selected_platforms = []
         st.rerun()
 
-    for group_name, plat_keys in groups.items():
-        st.markdown(f"<div style='color:#706040; font-size:0.73rem; font-weight:700; margin:0.5rem 0 0.2rem;'>{group_name}</div>", unsafe_allow_html=True)
-        cols = st.columns(len(plat_keys))
-        for col, key in zip(cols, plat_keys):
-            plat = PLATFORMS[key]
-            is_sel = key in st.session_state.selected_platforms
-            if col.button(
-                f"{plat['emoji']} {'✓' if is_sel else '○'}",
-                key=f"plat_{key}",
-                help=plat["label"],
-                use_container_width=True,
-                type="primary" if is_sel else "secondary"
-            ):
-                if is_sel:
-                    st.session_state.selected_platforms.remove(key)
-                else:
-                    st.session_state.selected_platforms.append(key)
-                st.rerun()
+    cols = st.columns(len(PLATFORMS))
+    for col, key in zip(cols, PLATFORMS.keys()):
+        plat = PLATFORMS[key]
+        is_sel = key in st.session_state.selected_platforms
+        if col.button(
+            f"{plat['emoji']} {'✓' if is_sel else '○'}",
+            key=f"plat_{key}",
+            help=plat["label"],
+            use_container_width=True,
+            type="primary" if is_sel else "secondary"
+        ):
+            if is_sel:
+                st.session_state.selected_platforms.remove(key)
+            else:
+                st.session_state.selected_platforms.append(key)
+            st.rerun()
 
     return st.session_state.selected_platforms
 
@@ -1295,29 +1287,31 @@ def show_studio_page():
                 use_container_width=True,
                 key="generate_images_btn"
             ):
-                progress_bar = st.progress(0, text="⚡ جاري التوليد...")
-                status_text  = st.empty()
-
-                def update_progress(val, msg):
-                    progress_bar.progress(val, text=msg)
-                    status_text.markdown(f"<div style='color:#D4B870; font-size:0.85rem;'>{msg}</div>", unsafe_allow_html=True)
-
-                try:
-                    results = generate_platform_images(
-                        info=perfume_info,
-                        selected_platforms=selected_platforms,
-                        outfit=outfit,
-                        scene=scene,
-                        include_character=include_char,
-                        progress_callback=update_progress,
-                        ramadan_mode=ramadan_mode
-                    )
-                    st.session_state.generated_images = results
-                    st.session_state.gen_count = st.session_state.get("gen_count", 0) + len(selected_platforms)
-                    status_text.empty()
-                    st.success(f"✅ تم توليد {len([r for r in results.values() if r.get('bytes')])} صورة بنجاح!")
-                except Exception as e:
-                    st.error(f"❌ خطأ في التوليد: {e}")
+                with st.spinner("⚡ جاري التوليد المتوازي..."):
+                    try:
+                        # إذا تم اختيار جميع المقاسات الثلاثة استخدم التوليد المتوازي
+                        if set(selected_platforms) == set(PLATFORMS.keys()):
+                            results = generate_concurrent_images(
+                                info=perfume_info,
+                                outfit=outfit,
+                                scene=scene,
+                                include_character=include_char,
+                                ramadan_mode=ramadan_mode
+                            )
+                        else:
+                            results = generate_platform_images(
+                                info=perfume_info,
+                                selected_platforms=selected_platforms,
+                                outfit=outfit,
+                                scene=scene,
+                                include_character=include_char,
+                                ramadan_mode=ramadan_mode
+                            )
+                        st.session_state.generated_images = results
+                        st.session_state.gen_count = st.session_state.get("gen_count", 0) + len(selected_platforms)
+                        st.success(f"✅ تم توليد {len([r for r in results.values() if r.get('bytes')])} صورة بنجاح!")
+                    except Exception as e:
+                        st.error(f"❌ خطأ في التوليد: {e}")
 
         # عرض الصور المولدة
         if "generated_images" in st.session_state and st.session_state.generated_images:
@@ -1388,6 +1382,11 @@ def show_studio_page():
                 st.error(captions["error"])
             else:
                 platform_names = {
+                    # المقاسات الثلاثة الجديدة (v13.0)
+                    "post_1_1":   "📸 منشور مربع 1:1",
+                    "story_9_16": "📱 قصة عمودية 9:16",
+                    "wide_16_9":  "🎬 عريض أفقي 16:9",
+                    # مفاتيح قديمة للتوافق مع generate_all_captions التي قد تُنتج مفاتيح بأسماء المنصات
                     "instagram_post": "📸 Instagram Post", "instagram_story": "📱 Instagram Story",
                     "tiktok": "🎵 TikTok", "youtube_short": "▶️ YouTube Short",
                     "youtube_thumb": "🎬 YouTube Thumbnail", "twitter": "🐦 Twitter/X",
@@ -1461,6 +1460,42 @@ def show_studio_page():
             with st.expander("📋 برومت Google Flow/Veo"):
                 st.markdown(f'<div class="flow-prompt">{sc.get("flow_prompt", "")}</div>', unsafe_allow_html=True)
                 st.code(sc.get("flow_prompt", ""), language="text")
+
+        # ── تعليق صوتي ElevenLabs ────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 🎙️ التعليق الصوتي (ElevenLabs)")
+        voiceover_text = st.text_area(
+            "نص التعليق الصوتي",
+            value=st.session_state.get("scenario_data", {}).get("hook", ""),
+            height=100,
+            key="voiceover_text_input",
+            placeholder="أدخل النص الذي تريد تحويله إلى صوت..."
+        )
+        if st.button("🎙️ توليد التعليق الصوتي", use_container_width=True, key="gen_voiceover_btn"):
+            secrets = _get_secrets()
+            if not secrets.get("elevenlabs"):
+                st.error("❌ ELEVENLABS_API_KEY مفقود — أضفه في إعدادات API")
+            elif not voiceover_text.strip():
+                st.warning("⚠️ أدخل نصاً للتعليق الصوتي أولاً")
+            else:
+                with st.spinner("🎙️ جاري توليد التعليق الصوتي..."):
+                    try:
+                        audio_bytes = generate_voiceover_elevenlabs(voiceover_text)
+                        st.session_state.voiceover_bytes = audio_bytes
+                        st.success("✅ تم توليد التعليق الصوتي!")
+                    except Exception as e:
+                        st.error(f"❌ فشل التوليد: {e}")
+
+        if "voiceover_bytes" in st.session_state:
+            st.audio(st.session_state.voiceover_bytes, format="audio/mpeg")
+            st.download_button(
+                "⬇️ تحميل الصوت (MP3)",
+                st.session_state.voiceover_bytes,
+                "voiceover.mp3",
+                "audio/mpeg",
+                use_container_width=True,
+                key="dl_voiceover"
+            )
 
     # ════════════════════════════════════════════════════════════
     # TAB 6: المحتوى
@@ -1599,22 +1634,17 @@ def show_studio_page():
             """, unsafe_allow_html=True)
 
         # اختيار المنصات المراد النشر عليها
-        st.markdown("#### 🎯 اختر المنصات المراد النشر عليها")
+        st.markdown("#### 🎯 اختر المقاسات المراد نشرها")
         publish_plat_opts = {
-            "instagram_post":  "📸 Instagram Post",
-            "instagram_story": "📱 Instagram Story",
-            "tiktok":          "🎵 TikTok",
-            "youtube_short":   "▶️ YouTube Short",
-            "twitter":         "🐦 Twitter/X",
-            "facebook":        "👍 Facebook",
-            "snapchat":        "👻 Snapchat",
+            "post_1_1":   "📸 منشور مربع 1:1",
+            "story_9_16": "📱 قصة عمودية 9:16",
+            "wide_16_9":  "🎬 عريض أفقي 16:9",
         }
-        p1, p2, p3, p4 = st.columns(4)
+        p1, p2, p3 = st.columns(3)
         selected_publish_platforms = []
         for i, (key, label) in enumerate(publish_plat_opts.items()):
-            col = [p1, p2, p3, p4][i % 4]
-            default_on = key in ("instagram_post", "instagram_story", "tiktok", "twitter")
-            if col.checkbox(label, value=default_on, key=f"pub_{key}"):
+            col = [p1, p2, p3][i % 3]
+            if col.checkbox(label, value=True, key=f"pub_{key}"):
                 selected_publish_platforms.append(key)
 
         # معاينة الـ payload
@@ -1658,7 +1688,6 @@ def show_studio_page():
                 captions   = st.session_state.get("captions_data", {})
 
                 payload = build_make_payload(perfume_info, image_urls, video_url, captions)
-                # إضافة المنصات المختارة للـ payload
                 payload["selected_platforms"] = selected_publish_platforms
 
                 with st.spinner("📤 جاري الإرسال إلى Make.com..."):
@@ -1681,6 +1710,27 @@ def show_studio_page():
                         "error":     result.get("error", "خطأ غير معروف"),
                     }
                 st.rerun()
+
+        # ── مزامنة Supabase ───────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 🗄️ حفظ في Supabase")
+        if st.button("🗄️ مزامنة مع Supabase", use_container_width=True, key="sync_supabase_btn"):
+            from modules.supabase_db import save_perfume_to_supabase
+            images_with_urls = {}
+            if has_images:
+                for key, data in st.session_state.generated_images.items():
+                    url_val = data.get("url")
+                    if url_val:
+                        images_with_urls[key] = {"url": url_val}
+            result_sb = save_perfume_to_supabase(
+                info=perfume_info,
+                images=images_with_urls,
+                video_url=st.session_state.get("video_url_ready", "")
+            )
+            if result_sb.get("success"):
+                st.success("✅ تم الحفظ في Supabase بنجاح!")
+            else:
+                st.error(f"❌ فشل الحفظ في Supabase: {result_sb.get('error', 'خطأ غير معروف')}")
 
     # ════════════════════════════════════════════════════════════
     # TAB 8: ترند ذكي
