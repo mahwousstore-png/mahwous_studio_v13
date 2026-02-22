@@ -17,9 +17,11 @@ from modules.ai_engine import (
     generate_hashtags, generate_scenario,
     generate_video_luma, check_luma_status, poll_luma_video,
     generate_video_runway, check_runway_status,
-    generate_image_gemini, generate_perfume_story,
+    generate_video_fal, check_fal_video_status,
+    generate_image_gemini, smart_generate_image, generate_perfume_story,
     build_manual_info, build_video_prompt,
-    PLATFORMS, MAHWOUS_OUTFITS, _get_secrets
+    load_asset_bytes,
+    PLATFORMS, MAHWOUS_OUTFITS, FAL_VIDEO_MODELS, _get_secrets
 )
 
 # ─── Studio CSS ────────────────────────────────────────────────────────────────
@@ -282,12 +284,12 @@ def _show_how_it_works():
 
 # ─── ✅ تبويب توليد الفيديو المباشر ──────────────────────────────────────────
 def _show_video_generation_tab(perfume_info: dict):
-    """تبويب توليد الفيديو المباشر — Luma + RunwayML"""
+    """تبويب توليد الفيديو المباشر — Luma + RunwayML + Fal.ai"""
     st.markdown("""
     <div class="video-card">
       <h3>🎬 توليد فيديو سينمائي مباشرة</h3>
       <div style='color:#A090D0; font-size:0.85rem;'>
-        Luma Dream Machine · RunwayML Gen-3 — فيديو احترافي في دقائق
+        Luma Dream Machine · RunwayML Gen-3 · Fal.ai (Kling/Veo/SVD) — فيديو احترافي في دقائق
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -295,9 +297,10 @@ def _show_video_generation_tab(perfume_info: dict):
     secrets = _get_secrets()
     has_luma   = bool(secrets["luma"])
     has_runway = bool(secrets["runway"])
+    has_fal    = bool(secrets["fal"])
 
     # حالة المفاتيح
-    col_l, col_r = st.columns(2)
+    col_l, col_r, col_f = st.columns(3)
     with col_l:
         if has_luma:
             st.markdown("<span class='api-badge-ok'>🟢 Luma Dream Machine متصل</span>", unsafe_allow_html=True)
@@ -308,9 +311,14 @@ def _show_video_generation_tab(perfume_info: dict):
             st.markdown("<span class='api-badge-ok'>🟢 RunwayML Gen-3 متصل</span>", unsafe_allow_html=True)
         else:
             st.markdown("<span class='api-badge-no'>🔴 RunwayML — أضف RUNWAY_API_KEY في الإعدادات</span>", unsafe_allow_html=True)
+    with col_f:
+        if has_fal:
+            st.markdown("<span class='api-badge-ok'>🟢 Fal.ai متصل</span>", unsafe_allow_html=True)
+        else:
+            st.markdown("<span class='api-badge-no'>🔴 Fal.ai — أضف FAL_API_KEY في الإعدادات</span>", unsafe_allow_html=True)
 
-    if not has_luma and not has_runway:
-        st.warning("⚠️ أضف مفتاح Luma أو RunwayML في الإعدادات لتفعيل توليد الفيديو")
+    if not has_luma and not has_runway and not has_fal:
+        st.warning("⚠️ أضف مفتاح Luma أو RunwayML أو FAL في الإعدادات لتفعيل توليد الفيديو")
         with st.expander("📋 كيف أحصل على مفاتيح API الفيديو؟"):
             st.markdown("""
             <div style='color:#D0B070; font-size:0.88rem; line-height:2;'>
@@ -321,20 +329,35 @@ def _show_video_generation_tab(perfume_info: dict):
             <strong style='color:#F5D060;'>RunwayML Gen-3:</strong><br>
             1. افتح <a href="https://runwayml.com" target="_blank" style="color:#C0A0FF;">runwayml.com</a><br>
             2. سجّل حساباً → API → Generate Token<br>
-            3. أضف المفتاح في الإعدادات كـ RUNWAY_API_KEY
+            3. أضف المفتاح في الإعدادات كـ RUNWAY_API_KEY<br><br>
+            <strong style='color:#F5D060;'>Fal.ai (Kling/Veo/SVD):</strong><br>
+            1. افتح <a href="https://fal.ai" target="_blank" style="color:#C0A0FF;">fal.ai</a><br>
+            2. سجّل حساباً → API Keys → Create<br>
+            3. أضف المفتاح في الإعدادات كـ FAL_API_KEY
             </div>
             """, unsafe_allow_html=True)
         return
 
     st.markdown("---")
 
+    # بناء قائمة مزودي الفيديو المتاحين
+    provider_options = []
+    if has_luma:
+        provider_options.append("luma")
+    if has_runway:
+        provider_options.append("runway")
+    if has_fal:
+        provider_options.append("fal")
+    if not provider_options:
+        provider_options = ["luma"]
+
     # إعدادات الفيديو
     vc1, vc2, vc3 = st.columns(3)
     with vc1:
         video_provider = st.selectbox(
             "🎬 منصة التوليد",
-            options=["luma"] + (["runway"] if has_runway else []),
-            format_func=lambda x: "Luma Dream Machine" if x == "luma" else "RunwayML Gen-3",
+            options=provider_options,
+            format_func=lambda x: {"luma": "Luma Dream Machine", "runway": "RunwayML Gen-3", "fal": "Fal.ai (Kling/Veo/SVD)"}.get(x, x),
             key="video_provider"
         )
     with vc2:
@@ -351,6 +374,18 @@ def _show_video_generation_tab(perfume_info: dict):
             index=0,
             key="video_aspect"
         )
+
+    # نموذج Fal.ai (يظهر فقط عند اختيار Fal)
+    if video_provider == "fal":
+        fal_video_model = st.selectbox(
+            "🤖 نموذج Fal.ai للفيديو",
+            options=["kling", "veo", "svd"],
+            format_func=lambda x: {"kling": "Kling v1.6", "veo": "Veo 2", "svd": "Stable Video (SVD)"}.get(x, x),
+            key="fal_video_model",
+            help="Kling: أفضل للفيديو الاحترافي · Veo: جودة عالية · SVD: سريع وخفيف"
+        )
+    else:
+        fal_video_model = "kling"
 
     vr1, vr2 = st.columns(2)
     with vr1:
@@ -401,13 +436,30 @@ def _show_video_generation_tab(perfume_info: dict):
         key="video_extra"
     )
 
-    # صورة مرجعية للفيديو
-    video_ref_img = st.file_uploader(
-        "🖼️ صورة مرجعية للفيديو (اختياري — لـ image-to-video)",
-        type=["jpg", "jpeg", "png"],
-        key="video_ref_upload",
-        help="ارفع صورة لتحويلها إلى فيديو متحرك"
+    # مصدر الصورة المرجعية للفيديو
+    has_char_ref = bool(st.session_state.get("char_reference_bytes"))
+    ref_src_options = ["none", "video_upload"] + (["char_ref"] if has_char_ref else [])
+    ref_src_labels  = {
+        "none":         "بدون مرجع",
+        "video_upload": "رفع صورة جديدة",
+        "char_ref":     "مرجع مهووس المحدد",
+    }
+    video_ref_source = st.selectbox(
+        "🖼️ مصدر الصورة المرجعية (image-to-video)",
+        options=ref_src_options,
+        format_func=lambda k: ref_src_labels.get(k, k),
+        key="video_ref_source",
+        help="استخدم مرجع الشخصية المُختار أو ارفع صورة خاصة بالفيديو"
     )
+
+    video_ref_img = None
+    if video_ref_source == "video_upload":
+        video_ref_img = st.file_uploader(
+            "📤 ارفع صورة مرجعية للفيديو",
+            type=["jpg", "jpeg", "png"],
+            key="video_ref_upload",
+            help="ارفع صورة لتحويلها إلى فيديو متحرك"
+        )
 
     # بناء البرومت
     video_prompt = build_video_prompt(
@@ -428,10 +480,11 @@ def _show_video_generation_tab(perfume_info: dict):
     st.markdown("---")
 
     # ── زر التوليد ──
+    provider_label = {"luma": "Luma Dream Machine", "runway": "RunwayML Gen-3", "fal": "Fal.ai"}.get(video_provider, video_provider)
     gen_col1, gen_col2 = st.columns([2, 1])
     with gen_col1:
         generate_video_btn = st.button(
-            f"🎬 توليد الفيديو الآن — {'Luma Dream Machine' if video_provider == 'luma' else 'RunwayML Gen-3'}",
+            f"🎬 توليد الفيديو الآن — {provider_label}",
             type="primary",
             use_container_width=True,
             key="generate_video_btn"
@@ -440,9 +493,15 @@ def _show_video_generation_tab(perfume_info: dict):
         loop_video = st.checkbox("🔄 فيديو حلقي (Loop)", value=False, key="loop_video")
 
     if generate_video_btn:
-        ref_bytes = video_ref_img.getvalue() if video_ref_img else None
+        # تحديد بايتات الصورة المرجعية
+        if video_ref_source == "char_ref":
+            ref_bytes = st.session_state.get("char_reference_bytes")
+        elif video_ref_source == "video_upload":
+            ref_bytes = video_ref_img.getvalue() if video_ref_img else None
+        else:
+            ref_bytes = None
 
-        with st.spinner(f"⚡ جاري إرسال طلب التوليد إلى {'Luma' if video_provider == 'luma' else 'RunwayML'}..."):
+        with st.spinner(f"⚡ جاري إرسال طلب التوليد إلى {provider_label}..."):
             if video_provider == "luma":
                 result = generate_video_luma(
                     prompt=video_prompt,
@@ -451,17 +510,37 @@ def _show_video_generation_tab(perfume_info: dict):
                     aspect_ratio=video_aspect,
                     loop=loop_video
                 )
-            else:
-                ratio_map = {"9:16": "720:1280", "16:9": "1280:720", "1:1": "720:720"}
+            elif video_provider == "runway":
                 result = generate_video_runway(
                     prompt=video_prompt,
                     image_bytes=ref_bytes,
+                    aspect_ratio=video_aspect,
                     duration=video_duration,
-                    ratio=ratio_map.get(video_aspect, "720:1280")
+                )
+            else:  # fal
+                result = generate_video_fal(
+                    prompt=video_prompt,
+                    model=fal_video_model,
+                    aspect_ratio=video_aspect,
+                    image_bytes=ref_bytes,
                 )
 
         if result.get("error"):
             st.markdown(f"<div class='video-status-error'>❌ {result['error']}</div>", unsafe_allow_html=True)
+        elif result.get("state") == "completed" and result.get("video_url"):
+            # Fal.ai أو أي مزود أعاد الفيديو فوراً
+            video_url = result["video_url"]
+            st.markdown(f"""
+            <div class='video-status-done'>
+              ✅ الفيديو جاهز!
+              <a href="{video_url}" target="_blank" style="color:#A0FFD8; font-weight:900;">
+                ← تحميل الفيديو
+              </a>
+            </div>
+            """, unsafe_allow_html=True)
+            st.video(video_url)
+            st.session_state["video_url_ready"] = video_url
+            st.session_state.gen_count = st.session_state.get("gen_count", 0) + 1
         else:
             gen_id = result.get("id", "")
             st.session_state["video_gen_id"] = gen_id
@@ -487,6 +566,8 @@ def _show_video_generation_tab(perfume_info: dict):
                 with st.spinner("جاري الفحص..."):
                     if provider == "luma":
                         status = check_luma_status(gen_id)
+                    elif provider == "fal":
+                        status = check_fal_video_status(gen_id)
                     else:
                         status = check_runway_status(gen_id)
 
@@ -524,6 +605,8 @@ def _show_video_generation_tab(perfume_info: dict):
                     progress_bar.progress(time_wait, text=f"⏳ انتظار... {i*10} ثانية")
                     if provider == "luma":
                         status = check_luma_status(gen_id)
+                    elif provider == "fal":
+                        status = check_fal_video_status(gen_id)
                     else:
                         status = check_runway_status(gen_id)
                     if status.get("state") == "completed":
@@ -621,8 +704,12 @@ def _show_single_image_tab(perfume_info: dict):
         if img_extra:
             prompt += f"\nAdditional: {img_extra}"
 
-        with st.spinner("🎨 جاري توليد الصورة بـ Imagen 3..."):
-            img_bytes = generate_image_gemini(prompt, img_aspect)
+        with st.spinner("🎨 جاري توليد الصورة..."):
+            try:
+                img_bytes = smart_generate_image(prompt, img_aspect)
+            except Exception as e:
+                st.error(f"❌ فشل توليد الصورة: {e}")
+                img_bytes = None
 
         if img_bytes:
             st.image(img_bytes, caption=f"✅ {img_type} — {img_aspect}", use_container_width=True)
@@ -633,8 +720,6 @@ def _show_single_image_tab(perfume_info: dict):
                 "image/jpeg",
                 use_container_width=True
             )
-        else:
-            st.error("❌ فشل توليد الصورة — تأكد من صحة GEMINI_API_KEY")
 
 
 # ─── Main Studio Page ──────────────────────────────────────────────────────────
@@ -654,6 +739,7 @@ def show_studio_page():
     has_openrouter = bool(secrets["openrouter"])
     has_luma       = bool(secrets["luma"])
     has_runway     = bool(secrets["runway"])
+    has_fal        = bool(secrets["fal"])
 
     # API Status Bar
     api_status = []
@@ -661,6 +747,7 @@ def show_studio_page():
     api_status.append(f"{'🟢' if has_openrouter else '🔴'} OpenRouter")
     api_status.append(f"{'🟢' if has_luma else '🔴'} Luma")
     api_status.append(f"{'🟢' if has_runway else '🔴'} RunwayML")
+    api_status.append(f"{'🟢' if has_fal else '🔴'} Fal.ai")
     st.markdown(f"""
     <div style='background:rgba(212,175,55,0.06); border:1px solid rgba(212,175,55,0.20);
          border-radius:0.6rem; padding:0.6rem 1rem; margin-bottom:1rem;
@@ -723,15 +810,51 @@ def show_studio_page():
 
         with col_char:
             st.markdown("**⚙️ إعدادات الجلسة**")
-            char_img = st.file_uploader(
-                "👤 صورة مرجعية لمهووس (اختياري)",
-                type=["jpg", "jpeg", "png"],
-                key="char_upload",
-                help="mahwous_character.png — يحافظ على ثبات الشخصية"
+
+            # ── مرجع شخصية مهووس المدمج ──────────────────────────
+            BUILTIN_REFS = {
+                "none":       ("بدون مرجع",        None),
+                "official":   ("رسمي",              "assets/character/mahwous_character_official.jpeg"),
+                "hoodie":     ("هودي",              "assets/character/mahwous_hoodie.jpg"),
+                "thobe":      ("ثوب",               "assets/character/mahwous_thobe.jpg"),
+                "thobe_car":  ("ثوب + سيارة",       "assets/character/mahwous_thobe_car.jpg"),
+                "tomford":    ("توم فورد",           "assets/character/mahwous_tomford.png"),
+                "upload":     ("رفع صورة يدوياً",   None),
+            }
+            ref_choice = st.selectbox(
+                "👤 مرجع مهووس",
+                options=list(BUILTIN_REFS.keys()),
+                format_func=lambda k: BUILTIN_REFS[k][0],
+                key="char_ref_choice",
+                help="اختر مرجعاً مدمجاً أو ارفع صورتك الخاصة"
             )
-            if char_img:
-                st.image(char_img, caption="✅ مرجع مهووس", use_container_width=True)
-                st.session_state.char_reference = char_img.getvalue()
+
+            if ref_choice == "upload":
+                char_img = st.file_uploader(
+                    "📤 ارفع صورة مرجعية",
+                    type=["jpg", "jpeg", "png"],
+                    key="char_upload",
+                    help="mahwous_character.png — يحافظ على ثبات الشخصية"
+                )
+                if char_img:
+                    st.image(char_img, caption="✅ مرجع مهووس", use_container_width=True)
+                    _ref_val = char_img.getvalue()
+                    st.session_state.char_reference = _ref_val
+                    st.session_state.char_reference_bytes = _ref_val
+                else:
+                    st.session_state.char_reference_bytes = None
+            elif ref_choice != "none":
+                asset_path = BUILTIN_REFS[ref_choice][1]
+                ref_bytes = load_asset_bytes(asset_path)
+                if ref_bytes:
+                    st.image(ref_bytes, caption=f"✅ {BUILTIN_REFS[ref_choice][0]}", use_container_width=True)
+                    st.session_state.char_reference = ref_bytes
+                    st.session_state.char_reference_bytes = ref_bytes
+                else:
+                    st.warning("⚠️ تعذّر تحميل الصورة المرجعية")
+                    st.session_state.char_reference_bytes = None
+            else:
+                st.session_state.char_reference_bytes = None
 
         if not uploaded:
             _show_how_it_works()
@@ -940,10 +1063,10 @@ def show_studio_page():
     # TAB 3: صورة مخصصة
     # ════════════════════════════════════════════════════════════
     with tab_single:
-        if has_gemini:
+        if has_gemini or has_fal:
             _show_single_image_tab(perfume_info)
         else:
-            st.error("❌ GEMINI_API_KEY مطلوب — أضفه في الإعدادات")
+            st.error("❌ GEMINI_API_KEY أو FAL_API_KEY مطلوب لتوليد الصور — أضف أحدهما في الإعدادات")
 
     # ════════════════════════════════════════════════════════════
     # TAB 4: التعليقات

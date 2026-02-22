@@ -37,6 +37,15 @@ def _get_secrets() -> dict:
     }
 
 
+def load_asset_bytes(relative_path: str):
+    """تحميل ملف من مجلد assets كبيانات خام (None عند الفشل)"""
+    try:
+        with open(relative_path, "rb") as f:
+            return f.read()
+    except Exception:
+        return None
+
+
 # ─── Model Endpoints ──────────────────────────────────────────────────────────
 OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
@@ -44,6 +53,12 @@ OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
 FAL_BASE         = "https://fal.run"
 FAL_FLUX_MODEL   = "fal-ai/flux/dev"
 FAL_FLUX_LORA    = "fal-ai/flux-lora"
+
+FAL_VIDEO_MODELS = {
+    "kling": "fal-ai/kling-video/v1.6/standard/text-to-video",
+    "veo":   "fal-ai/veo2",
+    "svd":   "fal-ai/stable-video",
+}
 
 LUMA_BASE        = "https://api.lumalabs.ai/dream-machine/v1"
 LUMA_GENERATIONS = f"{LUMA_BASE}/generations"
@@ -693,7 +708,8 @@ def generate_video_luma(prompt: str, aspect_ratio: str = "9:16",
         }
 
     r = requests.post(LUMA_GENERATIONS, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
+    if r.status_code not in (200, 201, 202):
+        return {"error": f"خطأ Luma {r.status_code}: {r.text[:200]}"}
     data = r.json()
     return {
         "id": data.get("id", ""),
@@ -713,7 +729,14 @@ def check_luma_status(generation_id: str) -> dict:
         "Content-Type": "application/json",
     }
     r = requests.get(f"{LUMA_GENERATIONS}/{generation_id}", headers=headers, timeout=30)
-    r.raise_for_status()
+    if r.status_code != 200:
+        return {
+            "id": generation_id,
+            "state": "error",
+            "video_url": "",
+            "failure_reason": "",
+            "error": f"خطأ Luma {r.status_code}: {r.text[:200]}",
+        }
     data = r.json()
     return {
         "id": generation_id,
@@ -744,8 +767,8 @@ def poll_luma_video(generation_id: str, max_wait: int = 300,
 
             if state == "completed":
                 return status
-            elif state in ("failed", "cancelled"):
-                raise ValueError(f"فشل توليد الفيديو: {status.get('failure_reason', state)}")
+            elif state in ("failed", "cancelled", "error"):
+                raise ValueError(f"فشل توليد الفيديو: {status.get('failure_reason', status.get('error', state))}")
 
             # انتظار تدريجي
             wait_time = min(10 + attempt * 2, 30)
@@ -787,7 +810,8 @@ def generate_video_runway(prompt: str, image_bytes: bytes = None,
         payload["promptImage"] = f"data:image/jpeg;base64,{b64}"
 
     r = requests.post(RUNWAY_GEN3, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
+    if r.status_code not in (200, 201, 202):
+        return {"error": f"خطأ RunwayML {r.status_code}: {r.text[:200]}"}
     data = r.json()
     return {
         "id": data.get("id", ""),
@@ -806,7 +830,16 @@ def check_runway_status(task_id: str) -> dict:
         "X-Runway-Version": "2024-11-06",
     }
     r = requests.get(f"{RUNWAY_BASE}/tasks/{task_id}", headers=headers, timeout=30)
-    r.raise_for_status()
+    if r.status_code != 200:
+        return {
+            "id": task_id,
+            "state": "error",
+            "status": "FAILED",
+            "video_url": "",
+            "progress": 0,
+            "error": f"خطأ RunwayML {r.status_code}: {r.text[:200]}",
+            "failure_reason": "",
+        }
     data = r.json()
     raw_status = data.get("status", "PENDING")
     # تحويل حالة RunwayML إلى صيغة موحدة مع Luma
@@ -826,6 +859,117 @@ def check_runway_status(task_id: str) -> dict:
         "error": data.get("failure", ""),
         "failure_reason": data.get("failure", ""),
     }
+
+
+# ─── Fal.ai Video Generation ──────────────────────────────────────────────────
+def generate_video_fal(prompt: str, model: str = "kling",
+                        aspect_ratio: str = "9:16",
+                        image_bytes: bytes = None) -> dict:
+    """توليد فيديو باستخدام Fal.ai (Kling/Veo/SVD)"""
+    secrets = _get_secrets()
+    if not secrets["fal"]:
+        return {"success": False, "provider": "fal", "error": "FAL_API_KEY مفقود — أضفه في إعدادات API"}
+
+    model_id = FAL_VIDEO_MODELS.get(model, FAL_VIDEO_MODELS["kling"])
+    headers = {
+        "Authorization": f"Key {secrets['fal']}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "prompt": prompt,
+        "aspect_ratio": aspect_ratio,
+    }
+
+    if image_bytes:
+        b64 = base64.b64encode(image_bytes).decode()
+        payload["image_url"] = f"data:image/jpeg;base64,{b64}"
+
+    try:
+        r = requests.post(
+            f"{FAL_BASE}/queue/submit/{model_id}",
+            headers=headers,
+            json=payload,
+            timeout=60,
+        )
+        if r.status_code not in (200, 202):
+            return {"success": False, "provider": "fal", "error": f"خطأ Fal.ai {r.status_code}: {r.text[:200]}"}
+
+        data = r.json()
+        request_id = data.get("request_id", "")
+        if not request_id:
+            return {"success": False, "provider": "fal", "error": "لم يتم الحصول على request_id من Fal.ai"}
+
+        # محاولة سريعة لمعرفة ما إذا كان الطلب قد اكتمل فوراً
+        status_r = requests.get(
+            f"{FAL_BASE}/queue/requests/{request_id}/status",
+            headers=headers,
+            timeout=15,
+        )
+        if status_r.status_code == 200 and status_r.json().get("status") == "COMPLETED":
+            result_r = requests.get(
+                f"{FAL_BASE}/queue/requests/{request_id}",
+                headers=headers,
+                timeout=30,
+            )
+            if result_r.status_code == 200:
+                rd = result_r.json()
+                video_url = (rd.get("video", {}).get("url") or rd.get("video_url") or "")
+                if video_url:
+                    return {"success": True, "provider": "fal", "state": "completed", "video_url": video_url}
+
+        return {"success": True, "provider": "fal", "state": "queued", "id": request_id}
+
+    except Exception as e:
+        return {"success": False, "provider": "fal", "error": str(e)}
+
+
+def check_fal_video_status(request_id: str) -> dict:
+    """فحص حالة توليد الفيديو في Fal.ai"""
+    secrets = _get_secrets()
+    if not secrets["fal"]:
+        return {"id": request_id, "state": "error", "video_url": "", "error": "FAL_API_KEY مفقود"}
+
+    headers = {
+        "Authorization": f"Key {secrets['fal']}",
+        "Content-Type": "application/json",
+    }
+
+    r = requests.get(
+        f"{FAL_BASE}/queue/requests/{request_id}/status",
+        headers=headers,
+        timeout=30,
+    )
+    if r.status_code != 200:
+        return {
+            "id": request_id,
+            "state": "error",
+            "video_url": "",
+            "error": f"خطأ Fal.ai {r.status_code}: {r.text[:200]}",
+        }
+
+    fal_status_map = {
+        "COMPLETED":   "completed",
+        "FAILED":      "failed",
+        "IN_PROGRESS": "dreaming",
+        "IN_QUEUE":    "queued",
+    }
+    raw = r.json().get("status", "IN_QUEUE")
+    state = fal_status_map.get(raw, "queued")
+
+    if state == "completed":
+        result_r = requests.get(
+            f"{FAL_BASE}/queue/requests/{request_id}",
+            headers=headers,
+            timeout=30,
+        )
+        if result_r.status_code == 200:
+            rd = result_r.json()
+            video_url = (rd.get("video", {}).get("url") or rd.get("video_url") or "")
+            return {"id": request_id, "state": "completed", "video_url": video_url, "provider": "fal"}
+        return {"id": request_id, "state": "error", "video_url": "", "error": f"خطأ في استرجاع نتيجة Fal.ai: {result_r.status_code}"}
+
+    return {"id": request_id, "state": state, "video_url": "", "provider": "fal", "progress": 0}
 
 
 # ─── Generate All Captions ────────────────────────────────────────────────────
