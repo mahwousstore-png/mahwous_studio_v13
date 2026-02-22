@@ -49,9 +49,10 @@ def _get_secrets() -> dict:
 GEMINI_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_VISION    = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
 GEMINI_TEXT      = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
-# ✅ FIXED: النماذج الصحيحة المتاحة عبر v1beta
-GEMINI_IMAGEN      = f"{GEMINI_BASE}/imagen-3.0-generate-001:predict"
-GEMINI_IMAGEN_FAST = f"{GEMINI_BASE}/imagen-3.0-fast-generate-001:predict"
+# ✅ FIXED: Imagen 4.0 — النماذج المتاحة فعلياً عبر v1beta
+GEMINI_IMAGEN      = f"{GEMINI_BASE}/imagen-4.0-generate-001:predict"
+GEMINI_IMAGEN_FAST = f"{GEMINI_BASE}/imagen-4.0-fast-generate-001:predict"
+GEMINI_IMAGEN_ULTRA= f"{GEMINI_BASE}/imagen-4.0-ultra-generate-001:predict"
 OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
 
@@ -267,8 +268,8 @@ def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1",
         return None
 
     ar = ASPECT_RATIO_MAP.get(aspect_ratio, "1:1")
-    # نستخدم دائماً imagen-3.0-generate-001 فقط (النموذج المتاح عبر v1beta)
-    endpoint = GEMINI_IMAGEN
+    # Imagen 4.0 — fast_mode يستخدم النموذج السريع
+    endpoint = GEMINI_IMAGEN_FAST if fast_mode else GEMINI_IMAGEN
     headers = {"Content-Type": "application/json", "x-goog-api-key": secrets["gemini"]}
 
     payload = {
@@ -278,7 +279,7 @@ def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1",
             "aspectRatio": ar,
             "safetyFilterLevel": "block_only_high",
             "personGeneration": "allow_adult",
-            "addWatermark": False,
+            # addWatermark غير مدعوم في Imagen 4
         }
     }
 
@@ -293,9 +294,8 @@ def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1",
             return None
         elif r.status_code == 404:
             raise Exception(
-                "🔴 Imagen 404: نموذج Imagen غير متاح لهذا المفتاح\n"
-                "حل: افتح Google AI Studio → تأكد من تفعيل Imagen API\n"
-                "رابط: https://aistudio.google.com/apikey"
+                "🔴 Imagen 4.0 غير متاح لهذا المفتاح\n"
+                "حل: استخدم مفتاح Gemini حديثاً من https://aistudio.google.com/apikey"
             )
         elif r.status_code == 429:
             time.sleep(8)
