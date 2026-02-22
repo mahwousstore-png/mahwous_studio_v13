@@ -20,6 +20,7 @@ from modules.ai_engine import (
     generate_video_fal, check_fal_video_status,
     generate_image_gemini, smart_generate_image, generate_perfume_story,
     build_manual_info, build_video_prompt,
+    send_to_make, build_make_payload,
     load_asset_bytes,
     PLATFORMS, MAHWOUS_OUTFITS, FAL_VIDEO_MODELS, _get_secrets
 )
@@ -931,13 +932,14 @@ def show_studio_page():
     st.markdown("---")
 
     # ─── Main Tabs ───────────────────────────────────────────────────────────
-    tab_images, tab_video, tab_single, tab_captions, tab_scenario, tab_content = st.tabs([
+    tab_images, tab_video, tab_single, tab_captions, tab_scenario, tab_content, tab_publish = st.tabs([
         "🖼️ توليد الصور",
         "🎬 توليد الفيديو",
         "🎨 صورة مخصصة",
         "✍️ التعليقات",
         "🎭 السيناريو",
-        "📝 المحتوى"
+        "📝 المحتوى",
+        "📤 نشر",
     ])
 
     # ════════════════════════════════════════════════════════════
@@ -1218,3 +1220,135 @@ def show_studio_page():
                         st.error(f"❌ {e}")
             if "story_data" in st.session_state:
                 st.text_area("📖 قصة العطر", st.session_state.story_data, height=300, key="story_text")
+
+    # ════════════════════════════════════════════════════════════
+    # TAB 7: نشر المحتوى
+    # ════════════════════════════════════════════════════════════
+    with tab_publish:
+        st.markdown("""
+        <div class="video-card">
+          <h3>📤 نشر المحتوى</h3>
+          <div style='color:#A090D0; font-size:0.85rem;'>
+            إرسال الصور والفيديو والتعليقات إلى Make.com لنشرها تلقائياً
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        secrets = _get_secrets()
+        has_webhook = bool(secrets.get("webhook"))
+
+        # ── حالة المحتوى المتاح ──────────────────────────────────
+        has_images   = bool(st.session_state.get("generated_images"))
+        has_video    = bool(st.session_state.get("video_url_ready"))
+        has_captions = bool(st.session_state.get("captions_data"))
+
+        st.markdown("#### 📋 ملخص المحتوى المتاح للنشر")
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            if has_images:
+                img_count = len([v for v in st.session_state.generated_images.values() if v.get("bytes")])
+                st.markdown(f"<span class='api-badge-ok'>🖼️ {img_count} صور جاهزة</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span class='api-badge-no'>🖼️ لا توجد صور — ولّد صوراً أولاً</span>", unsafe_allow_html=True)
+        with sc2:
+            if has_video:
+                st.markdown("<span class='api-badge-ok'>🎬 فيديو جاهز</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span class='api-badge-no'>🎬 لا يوجد فيديو بعد</span>", unsafe_allow_html=True)
+        with sc3:
+            if has_captions:
+                st.markdown("<span class='api-badge-ok'>✍️ تعليقات جاهزة</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span class='api-badge-no'>✍️ لا توجد تعليقات — ولّد تعليقات أولاً</span>", unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # ── إعدادات المنصة ───────────────────────────────────────
+        if not has_webhook:
+            st.markdown("""
+            <div class='warning-box'>
+              ⚠️ <strong>MAKE_WEBHOOK_URL</strong> غير محدد — أضفه في <strong>إعدادات API</strong> لتفعيل النشر التلقائي
+            </div>
+            """, unsafe_allow_html=True)
+
+        # اختيار المنصات المراد النشر عليها
+        st.markdown("#### 🎯 اختر المنصات المراد النشر عليها")
+        publish_plat_opts = {
+            "instagram_post":  "📸 Instagram Post",
+            "instagram_story": "📱 Instagram Story",
+            "tiktok":          "🎵 TikTok",
+            "youtube_short":   "▶️ YouTube Short",
+            "twitter":         "🐦 Twitter/X",
+            "facebook":        "👍 Facebook",
+            "snapchat":        "👻 Snapchat",
+        }
+        p1, p2, p3, p4 = st.columns(4)
+        selected_publish_platforms = []
+        for i, (key, label) in enumerate(publish_plat_opts.items()):
+            col = [p1, p2, p3, p4][i % 4]
+            default_on = key in ("instagram_post", "instagram_story", "tiktok", "twitter")
+            if col.checkbox(label, value=default_on, key=f"pub_{key}"):
+                selected_publish_platforms.append(key)
+
+        # معاينة الـ payload
+        with st.expander("👁️ معاينة البيانات المُرسلة (Payload)"):
+            preview_images = {}
+            if has_images:
+                for key, data in st.session_state.generated_images.items():
+                    if data.get("bytes") and key in selected_publish_platforms:
+                        preview_images[key] = f"[صورة {data['w']}×{data['h']} — {len(data['bytes'])//1024} KB]"
+            preview_payload = {
+                "perfume": {
+                    "brand": perfume_info.get("brand", ""),
+                    "product_name": perfume_info.get("product_name", ""),
+                },
+                "images_count": len(preview_images),
+                "images": preview_images,
+                "video_url": st.session_state.get("video_url_ready", ""),
+                "captions_platforms": list(st.session_state.get("captions_data", {}).keys()),
+                "selected_platforms": selected_publish_platforms,
+            }
+            st.json(preview_payload)
+
+        st.markdown("---")
+
+        # ── زر النشر ─────────────────────────────────────────────
+        if not has_images and not has_video:
+            st.warning("⚠️ ولّد صوراً أو فيديو أولاً قبل النشر")
+        elif not has_webhook:
+            st.info("💡 أضف MAKE_WEBHOOK_URL في الإعدادات ثم انقر النشر")
+        else:
+            if st.button("📤 نشر الآن عبر Make.com", type="primary", use_container_width=True, key="publish_btn"):
+                # بناء image_urls من الصور المولّدة (base64 data URIs)
+                image_urls = {}
+                if has_images:
+                    for key, data in st.session_state.generated_images.items():
+                        if data.get("bytes") and key in selected_publish_platforms:
+                            b64 = base64.b64encode(data["bytes"]).decode()
+                            image_urls[key] = f"data:image/jpeg;base64,{b64}"
+
+                video_url  = st.session_state.get("video_url_ready", "")
+                captions   = st.session_state.get("captions_data", {})
+
+                payload = build_make_payload(perfume_info, image_urls, video_url, captions)
+                # إضافة المنصات المختارة للـ payload
+                payload["selected_platforms"] = selected_publish_platforms
+
+                with st.spinner("📤 جاري الإرسال إلى Make.com..."):
+                    result = send_to_make(payload)
+
+                if result.get("success"):
+                    st.markdown(f"""
+                    <div class='video-status-done'>
+                      ✅ تم الإرسال بنجاح إلى Make.com!<br>
+                      <small>كود الاستجابة: {result.get('status_code', '—')} |
+                      الرد: {str(result.get('response', '—'))[:100]}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.session_state.gen_count = st.session_state.get("gen_count", 0) + 1
+                else:
+                    st.markdown(f"""
+                    <div class='video-status-error'>
+                      ❌ فشل الإرسال: {result.get('error', 'خطأ غير معروف')}
+                    </div>
+                    """, unsafe_allow_html=True)
