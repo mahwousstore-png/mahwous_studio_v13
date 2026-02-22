@@ -34,6 +34,8 @@ def _get_secrets() -> dict:
         "gemini":     _s("gemini_key",     "GEMINI_API_KEY"),
         "runway":     _s("runway_key",     "RUNWAY_API_KEY"),
         "webhook":    _s("webhook_url",    "MAKE_WEBHOOK_URL"),
+        "imgbb":      _s("imgbb_key",      "IMGBB_API_KEY"),
+        "elevenlabs": _s("elevenlabs_key", "ELEVENLABS_API_KEY"),
     }
 
 
@@ -44,6 +46,50 @@ def load_asset_bytes(relative_path: str):
             return f.read()
     except Exception:
         return None
+
+
+def upload_image_imgbb(image_bytes: bytes, name: str = "mahwous_image") -> dict:
+    """رفع صورة إلى ImgBB والحصول على رابط مباشر"""
+    secrets = _get_secrets()
+    if not secrets.get("imgbb"):
+        return {"success": False, "error": "IMGBB_API_KEY مفقود"}
+    b64 = base64.b64encode(image_bytes).decode()
+    try:
+        r = requests.post(
+            "https://api.imgbb.com/1/upload",
+            data={"key": secrets["imgbb"], "image": b64, "name": name},
+            timeout=30
+        )
+        r.raise_for_status()
+        data = r.json()
+        return {"success": True, "url": data["data"]["url"], "delete_url": data["data"]["delete_url"]}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def generate_voiceover_elevenlabs(text: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM") -> bytes:
+    """توليد تعليق صوتي باستخدام ElevenLabs TTS"""
+    secrets = _get_secrets()
+    if not secrets.get("elevenlabs"):
+        raise ValueError("ELEVENLABS_API_KEY مفقود — أضفه في إعدادات API")
+    headers = {
+        "xi-api-key": secrets["elevenlabs"],
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+    }
+    payload = {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+    }
+    r = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+        headers=headers,
+        json=payload,
+        timeout=60
+    )
+    r.raise_for_status()
+    return r.content
 
 
 # ─── Model Endpoints ──────────────────────────────────────────────────────────
@@ -75,16 +121,9 @@ RUNWAY_GEN3      = f"{RUNWAY_BASE}/image_to_video"
 
 # ─── Platform Sizes ────────────────────────────────────────────────────────────
 PLATFORMS = {
-    "instagram_post":   {"w": 1080, "h": 1080, "label": "📸 Instagram Post",    "aspect": "1:1",  "emoji": "📸", "fal_ratio": "1:1"},
-    "instagram_story":  {"w": 1080, "h": 1920, "label": "📱 Instagram Story",   "aspect": "9:16", "emoji": "📱", "fal_ratio": "9:16"},
-    "tiktok":           {"w": 1080, "h": 1920, "label": "🎵 TikTok",            "aspect": "9:16", "emoji": "🎵", "fal_ratio": "9:16"},
-    "youtube_short":    {"w": 1080, "h": 1920, "label": "▶️ YouTube Short",     "aspect": "9:16", "emoji": "▶️", "fal_ratio": "9:16"},
-    "youtube_thumb":    {"w": 1280, "h": 720,  "label": "🎬 YouTube Thumbnail", "aspect": "16:9", "emoji": "🎬", "fal_ratio": "16:9"},
-    "twitter":          {"w": 1200, "h": 675,  "label": "🐦 Twitter/X",         "aspect": "16:9", "emoji": "🐦", "fal_ratio": "16:9"},
-    "facebook":         {"w": 1200, "h": 630,  "label": "👍 Facebook",          "aspect": "16:9", "emoji": "👍", "fal_ratio": "16:9"},
-    "snapchat":         {"w": 1080, "h": 1920, "label": "👻 Snapchat",          "aspect": "9:16", "emoji": "👻", "fal_ratio": "9:16"},
-    "linkedin":         {"w": 1200, "h": 627,  "label": "💼 LinkedIn",          "aspect": "16:9", "emoji": "💼", "fal_ratio": "16:9"},
-    "pinterest":        {"w": 1000, "h": 1500, "label": "📌 Pinterest",         "aspect": "2:3",  "emoji": "📌", "fal_ratio": "2:3"},
+    "post_1_1":    {"w": 1080, "h": 1080, "label": "📸 منشور مربع",   "aspect": "1:1",  "emoji": "📸", "fal_ratio": "1:1"},
+    "story_9_16":  {"w": 1080, "h": 1920, "label": "📱 قصة عمودية",   "aspect": "9:16", "emoji": "📱", "fal_ratio": "9:16"},
+    "wide_16_9":   {"w": 1280, "h": 720,  "label": "🎬 عريض أفقي",    "aspect": "16:9", "emoji": "🎬", "fal_ratio": "16:9"},
 }
 
 # ─── Character DNA (ثبات الشخصية) ─────────────────────────────────────────────
@@ -685,11 +724,50 @@ def generate_three_mandatory_sizes(info: dict, outfit: str = "suit",
                                     ramadan_mode: bool = False,
                                     progress_callback=None) -> dict:
     """توليد 3 مقاسات إجبارية: 1:1 + 9:16 + 16:9"""
-    mandatory = ["instagram_post", "instagram_story", "twitter"]
+    mandatory = list(PLATFORMS.keys())
     return generate_platform_images(
         info, mandatory, outfit, scene,
         include_character, progress_callback, ramadan_mode
     )
+
+
+def generate_concurrent_images(info: dict, outfit: str = "suit",
+                                scene: str = "store",
+                                include_character: bool = True,
+                                ramadan_mode: bool = False) -> dict:
+    """توليد 3 مقاسات بالتوازي باستخدام ThreadPoolExecutor"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _gen_one(plat_key: str) -> tuple:
+        plat = PLATFORMS[plat_key]
+        if ramadan_mode:
+            prompt = build_ramadan_product_prompt(info, plat["aspect"])
+        elif include_character:
+            prompt = build_mahwous_product_prompt(info, outfit, scene, plat["aspect"])
+        else:
+            prompt = build_product_only_prompt(info, plat["aspect"])
+        try:
+            img_bytes = smart_generate_image(prompt, plat["aspect"], plat["w"], plat["h"])
+        except Exception:
+            img_bytes = None
+        return plat_key, {
+            "bytes":   img_bytes,
+            "label":   plat["label"],
+            "emoji":   plat["emoji"],
+            "w":       plat["w"],
+            "h":       plat["h"],
+            "aspect":  plat["aspect"],
+            "prompt":  prompt,
+            "success": img_bytes is not None,
+        }
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(_gen_one, key): key for key in PLATFORMS}
+        for future in as_completed(futures):
+            key, data = future.result()
+            results[key] = data
+    return results
 
 
 # ─── Luma Dream Machine Video ─────────────────────────────────────────────────
@@ -700,10 +778,12 @@ LUMA_MODELS = {
     "ray-1-6":           "Ray 1.6",
 }
 
+LUMA_MODEL = "ray-2"
+
 def generate_video_luma(prompt: str, aspect_ratio: str = "9:16",
                          duration: int = 5, image_url: str = None,
                          image_bytes: bytes = None, loop: bool = False,
-                         model: str = LUMA_DEFAULT_MODEL) -> dict:
+                         model: str = LUMA_MODEL) -> dict:
     """توليد فيديو باستخدام Luma Dream Machine"""
     secrets = _get_secrets()
     if not secrets["luma"]:
@@ -732,9 +812,14 @@ def generate_video_luma(prompt: str, aspect_ratio: str = "9:16",
     # إضافة صورة مرجعية إذا وُجدت (image_bytes أو image_url)
     ref_url = image_url
     if image_bytes and not ref_url:
-        # رفع الصورة كـ base64 data URI
-        b64 = base64.b64encode(image_bytes).decode()
-        ref_url = f"data:image/jpeg;base64,{b64}"
+        # محاولة رفع الصورة إلى ImgBB أولاً للحصول على رابط مباشر
+        imgbb_result = upload_image_imgbb(image_bytes)
+        if imgbb_result.get("success"):
+            ref_url = imgbb_result["url"]
+        else:
+            # الرجوع إلى base64 data URI عند عدم توفر ImgBB
+            b64 = base64.b64encode(image_bytes).decode()
+            ref_url = f"data:image/jpeg;base64,{b64}"
 
     if ref_url:
         payload["keyframes"] = {
@@ -1236,21 +1321,18 @@ def build_make_payload(info: dict, image_urls: dict, video_url: str,
             "mood": info.get("mood", ""),
         },
         "images": {
-            "instagram_post_1x1": image_urls.get("instagram_post", ""),
-            "instagram_story_9x16": image_urls.get("instagram_story", ""),
-            "twitter_16x9": image_urls.get("twitter", ""),
-            "tiktok_9x16": image_urls.get("tiktok", ""),
+            "post_1x1": image_urls.get("post_1_1", ""),
+            "story_9x16": image_urls.get("story_9_16", ""),
+            "wide_16x9": image_urls.get("wide_16_9", ""),
         },
         "video": {
             "url": video_url,
-            "platform": "tiktok_reels",
+            "platform": "short_video",
         },
         "captions": {
-            "instagram": captions.get("instagram_post", {}).get("caption", ""),
-            "instagram_hashtags": " ".join(captions.get("instagram_post", {}).get("hashtags", [])),
-            "twitter": captions.get("twitter", {}).get("caption", ""),
-            "tiktok": captions.get("tiktok", {}).get("caption", ""),
-            "facebook": captions.get("facebook", {}).get("caption", ""),
+            "post_1_1": captions.get("post_1_1", {}).get("caption", ""),
+            "story_9_16": captions.get("story_9_16", {}).get("caption", ""),
+            "wide_16_9": captions.get("wide_16_9", {}).get("caption", ""),
         },
         "seo_keywords": [
             "شراء عطور فاخرة",
