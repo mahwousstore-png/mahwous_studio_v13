@@ -110,9 +110,9 @@ LUMA_BASE        = "https://api.lumalabs.ai/dream-machine/v1"
 LUMA_GENERATIONS = f"{LUMA_BASE}/generations"
 
 GEMINI_BASE           = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_VISION         = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
-GEMINI_IMAGEN         = f"{GEMINI_BASE}/imagen-3.0-generate-002:predict"
-GEMINI_IMAGEN_DEFAULT = "imagen-3.0-generate-002"
+GEMINI_VISION         = f"{GEMINI_BASE}/gemini-2.0-flash-exp:generateContent"
+GEMINI_IMAGEN         = f"{GEMINI_BASE}/imagen-3.0-generate-001:predict"
+GEMINI_IMAGEN_DEFAULT = "imagen-3.0-generate-001"
 
 LUMA_DEFAULT_MODEL = "luma-photon"
 
