@@ -24,6 +24,7 @@ from modules.ai_engine import (
     generate_trend_insights,
     load_asset_bytes,
     generate_concurrent_images, generate_voiceover_elevenlabs,
+    upload_image_imgbb,
     PLATFORMS, MAHWOUS_OUTFITS, FAL_VIDEO_MODELS, _get_secrets
 )
 
@@ -191,6 +192,34 @@ def _create_zip(images: dict, info: dict) -> bytes:
         zf.writestr("info.json", json.dumps(meta, ensure_ascii=False, indent=2))
     buf.seek(0)
     return buf.read()
+
+
+def _trigger_supabase_sync(perfume_info: dict):
+    """رفع الصور إلى ImgBB إن لزم ثم حفظ بيانات العطر في Supabase تلقائياً"""
+    from modules.supabase_db import save_perfume_to_supabase
+    images_with_urls = {}
+    generated = st.session_state.get("generated_images", {})
+    for key, data in generated.items():
+        url_val = data.get("url")
+        if not url_val and data.get("bytes"):
+            try:
+                upload_result = upload_image_imgbb(data["bytes"], name=key)
+                if upload_result.get("success"):
+                    url_val = upload_result["url"]
+                    data["url"] = url_val
+            except Exception:
+                pass
+        if url_val:
+            images_with_urls[key] = {"url": url_val}
+    result_sb = save_perfume_to_supabase(
+        info=perfume_info,
+        images=images_with_urls if images_with_urls else None,
+        video_url=st.session_state.get("video_url_ready") or None
+    )
+    if result_sb.get("success"):
+        st.success("✅ تم الحفظ تلقائياً في Supabase!")
+    else:
+        st.warning(f"⚠️ تعذّر الحفظ في Supabase: {result_sb.get('error', 'خطأ غير معروف')}")
 
 
 def _info_card(info: dict):
@@ -535,6 +564,7 @@ def _show_video_generation_tab(perfume_info: dict):
             st.video(video_url)
             st.session_state["video_url_ready"] = video_url
             st.session_state.gen_count = st.session_state.get("gen_count", 0) + 1
+            _trigger_supabase_sync(perfume_info)
         else:
             gen_id = result.get("id", "")
             st.session_state["video_gen_id"] = gen_id
@@ -579,6 +609,7 @@ def _show_video_generation_tab(perfume_info: dict):
                     """, unsafe_allow_html=True)
                     st.video(video_url)
                     st.session_state["video_url_ready"] = video_url
+                    _trigger_supabase_sync(perfume_info)
                 elif state in ["failed", "error"]:
                     err = status.get("error", "خطأ غير معروف")
                     st.markdown(f"<div class='video-status-error'>❌ فشل التوليد: {err}</div>", unsafe_allow_html=True)
@@ -616,6 +647,7 @@ def _show_video_generation_tab(perfume_info: dict):
                         """, unsafe_allow_html=True)
                         st.video(video_url)
                         st.session_state["video_url_ready"] = video_url
+                        _trigger_supabase_sync(perfume_info)
                         break
                     elif status.get("state") in ["failed", "error"]:
                         progress_bar.progress(1.0, text="❌ فشل التوليد")
@@ -1310,6 +1342,7 @@ def show_studio_page():
                         st.session_state.generated_images = results
                         st.session_state.gen_count = st.session_state.get("gen_count", 0) + len(selected_platforms)
                         st.success(f"✅ تم توليد {len([r for r in results.values() if r.get('bytes')])} صورة بنجاح!")
+                        _trigger_supabase_sync(perfume_info)
                     except Exception as e:
                         st.error(f"❌ خطأ في التوليد: {e}")
 
