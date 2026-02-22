@@ -109,8 +109,8 @@ FAL_VIDEO_MODELS = {
 LUMA_BASE        = "https://api.lumalabs.ai/dream-machine/v1"
 LUMA_GENERATIONS = f"{LUMA_BASE}/generations"
 
-GEMINI_BASE           = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_VISION         = f"{GEMINI_BASE}/gemini-2.0-flash-exp:generateContent"
+GEMINI_BASE           = "https://generativelanguage.googleapis.com/v1/models"
+GEMINI_VISION         = f"{GEMINI_BASE}/gemini-1.5-flash:generateContent"
 GEMINI_IMAGEN         = f"{GEMINI_BASE}/imagen-3.0-generate-001:predict"
 GEMINI_IMAGEN_DEFAULT = "imagen-3.0-generate-001"
 
@@ -504,8 +504,9 @@ STRICT RULES:
 
 # ─── Fal.ai Image Generation ──────────────────────────────────────────────────
 def generate_image_fal(prompt: str, aspect_ratio: str = "1:1",
-                        width: int = 1080, height: int = 1080) -> bytes:
-    """توليد صورة باستخدام Fal.ai (Flux Dev)"""
+                        width: int = 1080, height: int = 1080, 
+                        image_bytes: bytes = None) -> bytes:
+    """توليد صورة باستخدام Fal.ai (Flux Pro) مع دعم المرجع"""
     secrets = _get_secrets()
     if not secrets["fal"]:
         raise ValueError("FAL_API_KEY مفقود — أضفه في إعدادات API")
@@ -534,9 +535,16 @@ def generate_image_fal(prompt: str, aspect_ratio: str = "1:1",
         "output_format": "jpeg",
     }
 
-    # إرسال الطلب
+    # إضافة الصورة المرجعية إذا وُجدت
+    if image_bytes:
+        imgbb_res = upload_image_imgbb(image_bytes)
+        if imgbb_res.get("success"):
+            payload["image_url"] = imgbb_res["url"]
+            payload["strength"] = 0.65  # توازن بين المرجع والبرومت
+
+    # إرسال الطلب (تغيير الموديل إلى pro للحصول على أفضل جودة)
     r = requests.post(
-        f"{FAL_BASE}/{FAL_FLUX_MODEL}",
+        f"{FAL_BASE}/fal-ai/flux-pro/v1.1-ultra",
         headers=headers,
         json=payload,
         timeout=120
@@ -652,14 +660,18 @@ def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1") -> bytes:
 
 
 def smart_generate_image(prompt: str, aspect_ratio: str = "1:1",
-                          width: int = 1080, height: int = 1080) -> bytes:
+                          width: int = 1080, height: int = 1080,
+                          image_bytes: bytes = None) -> bytes:
     """توليد صورة ذكي: Fal.ai أولاً ثم Gemini كـ fallback"""
     secrets = _get_secrets()
+
+    # محاولة استخدام مرجع الشخصية من الجلسة إذا لم يتم تمرير صورة
+    ref_bytes = image_bytes or st.session_state.get("char_reference_bytes")
 
     if secrets["fal"]:
         try:
             return with_retry(
-                lambda: generate_image_fal(prompt, aspect_ratio, width, height),
+                lambda: generate_image_fal(prompt, aspect_ratio, width, height, ref_bytes),
                 max_attempts=2
             )
         except Exception as e:
@@ -704,7 +716,7 @@ def generate_platform_images(info: dict, selected_platforms: list, outfit: str,
             prompt = build_product_only_prompt(info, plat["aspect"])
 
         try:
-            img_bytes = smart_generate_image(prompt, plat["aspect"], plat["w"], plat["h"])
+            img_bytes = smart_generate_image(prompt, plat["aspect"], plat["w"], plat["h"], st.session_state.get("char_reference_bytes"))
         except Exception as e:
             img_bytes = None
             st.error(f"❌ فشل توليد {plat['label']}: {e}")
@@ -755,7 +767,7 @@ def generate_concurrent_images(info: dict, outfit: str = "suit",
         else:
             prompt = build_product_only_prompt(info, plat["aspect"])
         try:
-            img_bytes = smart_generate_image(prompt, plat["aspect"], plat["w"], plat["h"])
+            img_bytes = smart_generate_image(prompt, plat["aspect"], plat["w"], plat["h"], st.session_state.get("char_reference_bytes"))
         except Exception:
             img_bytes = None
         return plat_key, {
