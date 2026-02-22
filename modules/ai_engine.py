@@ -50,23 +50,16 @@ LUMA_GENERATIONS = f"{LUMA_BASE}/generations"
 
 GEMINI_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_VISION    = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
-GEMINI_IMAGEN    = f"{GEMINI_BASE}/imagen-3.0-generate-002:predict"
+GEMINI_IMAGEN    = f"{GEMINI_BASE}/imagen-3.0-generate-001:predict"
 
 RUNWAY_BASE      = "https://api.dev.runwayml.com/v1"
 RUNWAY_GEN3      = f"{RUNWAY_BASE}/image_to_video"
 
 # ─── Platform Sizes ────────────────────────────────────────────────────────────
 PLATFORMS = {
-    "instagram_post":   {"w": 1080, "h": 1080, "label": "📸 Instagram Post",    "aspect": "1:1",  "emoji": "📸", "fal_ratio": "1:1"},
-    "instagram_story":  {"w": 1080, "h": 1920, "label": "📱 Instagram Story",   "aspect": "9:16", "emoji": "📱", "fal_ratio": "9:16"},
-    "tiktok":           {"w": 1080, "h": 1920, "label": "🎵 TikTok",            "aspect": "9:16", "emoji": "🎵", "fal_ratio": "9:16"},
-    "youtube_short":    {"w": 1080, "h": 1920, "label": "▶️ YouTube Short",     "aspect": "9:16", "emoji": "▶️", "fal_ratio": "9:16"},
-    "youtube_thumb":    {"w": 1280, "h": 720,  "label": "🎬 YouTube Thumbnail", "aspect": "16:9", "emoji": "🎬", "fal_ratio": "16:9"},
-    "twitter":          {"w": 1200, "h": 675,  "label": "🐦 Twitter/X",         "aspect": "16:9", "emoji": "🐦", "fal_ratio": "16:9"},
-    "facebook":         {"w": 1200, "h": 630,  "label": "👍 Facebook",          "aspect": "16:9", "emoji": "👍", "fal_ratio": "16:9"},
-    "snapchat":         {"w": 1080, "h": 1920, "label": "👻 Snapchat",          "aspect": "9:16", "emoji": "👻", "fal_ratio": "9:16"},
-    "linkedin":         {"w": 1200, "h": 627,  "label": "💼 LinkedIn",          "aspect": "16:9", "emoji": "💼", "fal_ratio": "16:9"},
-    "pinterest":        {"w": 1000, "h": 1500, "label": "📌 Pinterest",         "aspect": "2:3",  "emoji": "📌", "fal_ratio": "2:3"},
+    "post_1_1":   {"w": 1080, "h": 1080, "label": "📸 Square (1:1)",    "aspect": "1:1",  "emoji": "📸", "fal_ratio": "1:1"},
+    "story_9_16":  {"w": 1080, "h": 1920, "label": "📱 Portrait (9:16)",  "aspect": "9:16", "emoji": "📱", "fal_ratio": "9:16"},
+    "wide_16_9":   {"w": 1280, "h": 720,  "label": "🖥️ Landscape (16:9)", "aspect": "16:9", "emoji": "🎬", "fal_ratio": "16:9"},
 }
 
 # ─── Character DNA (ثبات الشخصية) ─────────────────────────────────────────────
@@ -642,7 +635,7 @@ def generate_three_mandatory_sizes(info: dict, outfit: str = "suit",
                                     ramadan_mode: bool = False,
                                     progress_callback=None) -> dict:
     """توليد 3 مقاسات إجبارية: 1:1 + 9:16 + 16:9"""
-    mandatory = ["instagram_post", "instagram_story", "twitter"]
+    mandatory = ["post_1_1", "story_9_16", "wide_16_9"]
     return generate_platform_images(
         info, mandatory, outfit, scene,
         include_character, progress_callback, ramadan_mode
@@ -993,10 +986,9 @@ def build_make_payload(info: dict, image_urls: dict, video_url: str,
             "mood": info.get("mood", ""),
         },
         "images": {
-            "instagram_post_1x1": image_urls.get("instagram_post", ""),
-            "instagram_story_9x16": image_urls.get("instagram_story", ""),
-            "twitter_16x9": image_urls.get("twitter", ""),
-            "tiktok_9x16": image_urls.get("tiktok", ""),
+            "square_1x1": image_urls.get("post_1_1", ""),
+            "portrait_9x16": image_urls.get("story_9_16", ""),
+            "landscape_16x9": image_urls.get("wide_16_9", ""),
         },
         "video": {
             "url": video_url,
