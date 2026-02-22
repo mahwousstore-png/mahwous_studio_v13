@@ -580,16 +580,16 @@ def show_settings_page():
     # ── كيفية الحفظ الدائم ──────────────────────────────────────────────────
     with st.expander("📋 كيفية الحفظ الدائم (secrets.toml)"):
         st.code("""# .streamlit/secrets.toml
-GEMINI_API_KEY = "YOUR_API_KEY"
-OPENROUTER_API_KEY = "YOUR_API_KEY"
-FAL_API_KEY = "YOUR_API_KEY"
-LUMA_API_KEY = "YOUR_API_KEY"
-RUNWAY_API_KEY = "YOUR_API_KEY"
-MAKE_WEBHOOK_URL = "YOUR_WEBHOOK_URL"
-IMGBB_API_KEY = "YOUR_API_KEY"
-ELEVENLABS_API_KEY = "YOUR_API_KEY"
-SUPABASE_URL = "YOUR_SUPABASE_URL"
-SUPABASE_API_KEY = "YOUR_API_KEY"
+GEMINI_API_KEY = "<paste-gemini-key>"
+OPENROUTER_API_KEY = "<paste-openrouter-key>"
+FAL_API_KEY = "<paste-fal-key>"
+LUMA_API_KEY = "<paste-luma-key>"
+RUNWAY_API_KEY = "<paste-runway-key>"
+MAKE_WEBHOOK_URL = "<paste-webhook-url>"
+IMGBB_API_KEY = "<paste-imgbb-key>"
+ELEVENLABS_API_KEY = "<paste-elevenlabs-key>"
+SUPABASE_URL = "<paste-supabase-url>"
+SUPABASE_API_KEY = "<paste-supabase-key>"
 """, language="toml")
         st.markdown("""
         <div style='color:#D0B070; font-size:0.82rem;'>
