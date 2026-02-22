@@ -15,12 +15,17 @@ from PIL import Image
 
 # ─── API Configs ──────────────────────────────────────────────────────────────
 def _get_secrets() -> dict:
-    """استرجاع مفاتيح API من session_state أو st.secrets"""
+    """استرجاع مفاتيح API من session_state أو st.secrets (مع تجاهل غياب secrets.toml)"""
     def _s(session_key, secret_key, default=""):
-        return (
-            st.session_state.get(session_key, "") or
-            st.secrets.get(secret_key, default)
-        )
+        # أولاً: من session_state (المُدخل يدوياً في الواجهة)
+        val = st.session_state.get(session_key, "")
+        if val:
+            return val
+        # ثانياً: من st.secrets (إذا وُجد الملف)
+        try:
+            return st.secrets.get(secret_key, default)
+        except Exception:
+            return default
     return {
         "fal":        _s("fal_key",        "FAL_API_KEY"),
         "luma":       _s("luma_key",       "LUMA_API_KEY"),
@@ -172,16 +177,64 @@ def generate_text_gemini(prompt: str, temperature: float = 0.7) -> str:
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
+def generate_text_openai_compat(prompt: str, system: str = None,
+                                 temperature: float = 0.75, max_tokens: int = 4096) -> str:
+    """توليد نص عبر OpenAI-compatible API (fallback ثالث)"""
+    import os
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY غير موجود في البيئة")
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        resp = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return resp.choices[0].message.content
+    except ImportError:
+        # fallback بدون مكتبة openai
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        payload = {"model": "gpt-4.1-mini", "messages": messages,
+                   "max_tokens": max_tokens, "temperature": temperature}
+        r = requests.post(f"{base_url}/chat/completions",
+                          headers=headers, json=payload, timeout=90)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+
+
 def smart_generate_text(prompt: str, system: str = None, temperature: float = 0.75) -> str:
-    """توليد نص ذكي مع fallback تلقائي"""
+    """توليد نص ذكي مع fallback تلقائي: OpenRouter → Gemini → OpenAI-compat"""
+    # المحاولة 1: OpenRouter (Claude 3.5)
     try:
         return with_retry(lambda: generate_text_openrouter(prompt, system, temperature))
     except Exception:
-        try:
-            full_prompt = f"{system}\n\n{prompt}" if system else prompt
-            return with_retry(lambda: generate_text_gemini(full_prompt, temperature))
-        except Exception as e:
-            raise Exception(f"فشل توليد النص عبر جميع النماذج: {e}")
+        pass
+    # المحاولة 2: Gemini
+    try:
+        full_prompt = f"{system}\n\n{prompt}" if system else prompt
+        return with_retry(lambda: generate_text_gemini(full_prompt, temperature))
+    except Exception:
+        pass
+    # المحاولة 3: OpenAI-compatible (gpt-4.1-mini)
+    try:
+        return with_retry(lambda: generate_text_openai_compat(prompt, system, temperature))
+    except Exception as e:
+        raise Exception(f"فشل توليد النص عبر جميع النماذج (OpenRouter + Gemini + OpenAI): {e}")
 
 
 # ─── Gemini Vision: تحليل صورة العطر ─────────────────────────────────────────
