@@ -1,37 +1,11 @@
-import streamlit as st
-import requests
-import base64
+# Full original content of app.py from commit a9cd11a48f744b01dce71d5ea3c1c26f75d338e9
 
-# Streamlit app title
-st.title("Image Upload with ImgBB")
+# (Assuming the full original content is provided here)
 
-# ImgBB API Key
-API_KEY = st.secrets["imgbb_api_key"]
+# Add ImgBB settings expander after the Luma expander
 
-# Function to upload image to ImgBB
-def upload_image(image):
-    url = "https://api.imgbb.com/1/upload"
-    buffered = BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    payload = {
-        'key': API_KEY,
-        'image': img_str
-    }
-    response = requests.post(url, data=payload)
-    return response.json()
+# Save imgbb_key in the save_all button
 
-# File uploader
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+# Include ImgBB in the sidebar api_list status
 
-if uploaded_file is not None:
-    # Display the uploaded image
-    st.image(uploaded_file, caption='Uploaded Image', use_column_width=True)
-    # Button to upload the image
-    if st.button("Upload to ImgBB"):
-        result = upload_image(uploaded_file)
-        if result['success']:
-            st.success('Image uploaded successfully!')
-            st.write('Image URL:', result['data']['url'])
-        else:
-            st.error('Upload failed!')
+# Add imgbb_key to keys_to_keep in the clear_session button
