@@ -64,22 +64,22 @@ print("📸 بناء برومتات الصور (3 مقاسات)")
 print("─" * 50)
 
 prompts = {
-    "instagram_post": {
-        "platform": PLATFORMS["instagram_post"],
+    "post_1_1": {
+        "platform": PLATFORMS["post_1_1"],
         "prompt": build_mahwous_product_prompt(info, outfit="suit", scene="store", platform_aspect="1:1"),
         "size": "1080x1080",
         "ratio": "1:1",
     },
-    "instagram_story": {
-        "platform": PLATFORMS["instagram_story"],
+    "story_9_16": {
+        "platform": PLATFORMS["story_9_16"],
         "prompt": build_mahwous_product_prompt(info, outfit="suit", scene="studio", platform_aspect="9:16"),
         "size": "1080x1920",
         "ratio": "9:16",
     },
-    "twitter": {
-        "platform": PLATFORMS["twitter"],
+    "wide_16_9": {
+        "platform": PLATFORMS["wide_16_9"],
         "prompt": build_mahwous_product_prompt(info, outfit="suit", scene="rooftop", platform_aspect="16:9"),
-        "size": "1200x675",
+        "size": "1280x720",
         "ratio": "16:9",
     },
 }
@@ -391,19 +391,19 @@ html_content = f"""<!DOCTYPE html>
     <div class="section-title">🖼️ برومتات الصور (Fal.ai Flux)</div>
     <div class="platform-grid">
       <div class="platform-card">
-        <div class="platform-label">📸 Instagram Post (1:1)</div>
+        <div class="platform-label">📸 Square (1:1)</div>
         <div class="platform-size">1080×1080 — مهووس مع العطر في المتجر</div>
-        <div class="prompt-box">{prompts['instagram_post']['prompt'][:500]}...</div>
+        <div class="prompt-box">{prompts['post_1_1']['prompt'][:500]}...</div>
       </div>
       <div class="platform-card">
-        <div class="platform-label">📱 Instagram Story (9:16)</div>
+        <div class="platform-label">📱 Portrait (9:16)</div>
         <div class="platform-size">1080×1920 — مهووس مع العطر في الاستديو</div>
-        <div class="prompt-box">{prompts['instagram_story']['prompt'][:500]}...</div>
+        <div class="prompt-box">{prompts['story_9_16']['prompt'][:500]}...</div>
       </div>
       <div class="platform-card">
-        <div class="platform-label">🐦 Twitter/X (16:9)</div>
-        <div class="platform-size">1200×675 — مهووس مع العطر على السطح</div>
-        <div class="prompt-box">{prompts['twitter']['prompt'][:500]}...</div>
+        <div class="platform-label">🖥️ Landscape (16:9)</div>
+        <div class="platform-size">1280×720 — مهووس مع العطر على السطح</div>
+        <div class="prompt-box">{prompts['wide_16_9']['prompt'][:500]}...</div>
       </div>
     </div>
   </div>
@@ -465,9 +465,9 @@ print(f"  ✅ تقرير HTML محفوظ: test_output/content_report.html")
 print("\n" + "=" * 70)
 print("📊 ملخص النتائج النهائية")
 print("=" * 70)
-print(f"✅ برومت Instagram Post (1080×1080 | 1:1): {len(prompts['instagram_post']['prompt'])} حرف")
-print(f"✅ برومت Instagram Story (1080×1920 | 9:16): {len(prompts['instagram_story']['prompt'])} حرف")
-print(f"✅ برومت Twitter (1200×675 | 16:9): {len(prompts['twitter']['prompt'])} حرف")
+print(f"✅ برومت Square (1080×1080 | 1:1): {len(prompts['post_1_1']['prompt'])} حرف")
+print(f"✅ برومت Portrait (1080×1920 | 9:16): {len(prompts['story_9_16']['prompt'])} حرف")
+print(f"✅ برومت Landscape (1280×720 | 16:9): {len(prompts['wide_16_9']['prompt'])} حرف")
 print(f"✅ برومت فيديو عمودي (9:16 | TikTok/Reels): {len(video_prompts['vertical_9x16']['prompt'])} حرف")
 print(f"✅ برومت فيديو أفقي (16:9 | YouTube): {len(video_prompts['horizontal_16x9']['prompt'])} حرف")
 print(f"{'✅' if captions else '❌'} التعليقات (3 منصات): {'نجح' if captions else 'فشل'}")

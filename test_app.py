@@ -83,7 +83,7 @@ print(f"  ✓ المزاج: {info['mood']}")
 
 # ─── اختبار 2: بناء برومت الصورة مع مهووس ─────────────────────
 print("\n✅ اختبار 2: build_mahwous_product_prompt")
-for platform_key in ["instagram_post", "instagram_story", "twitter"]:
+for platform_key in ["post_1_1", "story_9_16", "wide_16_9"]:
     plat = PLATFORMS[platform_key]
     prompt = build_mahwous_product_prompt(info, outfit="suit", scene="store", platform_aspect=plat["fal_ratio"])
     print(f"  ✓ {plat['label']} ({plat['w']}x{plat['h']}) — برومت: {len(prompt)} حرف")
@@ -107,7 +107,7 @@ for scene_type in ["مهووس مع العطر", "العطر يتكلم وحده
 
 # ─── اختبار 5: التحقق من منطق المنصات ─────────────────────────
 print("\n✅ اختبار 5: PLATFORMS")
-mandatory = ["instagram_post", "instagram_story", "twitter"]
+mandatory = ["post_1_1", "story_9_16", "wide_16_9"]
 for key in mandatory:
     p = PLATFORMS[key]
     print(f"  ✓ {p['label']}: {p['w']}x{p['h']} | {p['aspect']}")
