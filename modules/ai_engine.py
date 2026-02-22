@@ -63,9 +63,12 @@ FAL_VIDEO_MODELS = {
 LUMA_BASE        = "https://api.lumalabs.ai/dream-machine/v1"
 LUMA_GENERATIONS = f"{LUMA_BASE}/generations"
 
-GEMINI_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_VISION    = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
-GEMINI_IMAGEN    = f"{GEMINI_BASE}/imagen-3.0-generate-002:predict"
+GEMINI_BASE           = "https://generativelanguage.googleapis.com/v1beta/models"
+GEMINI_VISION         = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
+GEMINI_IMAGEN         = f"{GEMINI_BASE}/imagen-3.0-generate-002:predict"
+GEMINI_IMAGEN_DEFAULT = "imagen-3.0-generate-002"
+
+LUMA_DEFAULT_MODEL = "luma-photon"
 
 RUNWAY_BASE      = "https://api.dev.runwayml.com/v1"
 RUNWAY_GEN3      = f"{RUNWAY_BASE}/image_to_video"
@@ -548,6 +551,17 @@ def _poll_fal_queue(request_id: str, api_key: str, max_wait: int = 120) -> bytes
     raise TimeoutError("انتهت مهلة انتظار Fal.ai")
 
 
+def _get_gemini_imagen_endpoint() -> str:
+    """endpoint Gemini Imagen (قابل للضبط عبر GEMINI_IMAGEN_MODEL في البيئة/secrets)"""
+    import os
+    model = (
+        st.session_state.get("gemini_imagen_model", "")
+        or os.environ.get("GEMINI_IMAGEN_MODEL", "")
+        or GEMINI_IMAGEN_DEFAULT
+    )
+    return f"{GEMINI_BASE}/{model}:predict"
+
+
 def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1") -> bytes:
     """توليد صورة باستخدام Gemini Imagen 3 (بديل)"""
     secrets = _get_secrets()
@@ -560,6 +574,7 @@ def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1") -> bytes:
     }
     ar = aspect_map.get(aspect_ratio, "1:1")
 
+    endpoint = _get_gemini_imagen_endpoint()
     headers = {"Content-Type": "application/json", "x-goog-api-key": secrets["gemini"]}
     payload = {
         "instances": [{"prompt": prompt}],
@@ -570,7 +585,14 @@ def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1") -> bytes:
             "personGeneration": "allow_all",
         }
     }
-    r = requests.post(GEMINI_IMAGEN, headers=headers, json=payload, timeout=120)
+    r = requests.post(endpoint, headers=headers, json=payload, timeout=120)
+    if r.status_code == 404:
+        model_name = endpoint.split("/")[-1].replace(":predict", "")
+        raise ValueError(
+            f"نموذج Gemini Imagen غير متاح ({model_name}) — "
+            f"تحقق من دعم الموديل في حسابك أو غيّر GEMINI_IMAGEN_MODEL. "
+            f"404 Not Found"
+        )
     r.raise_for_status()
     data = r.json()
     predictions = data.get("predictions", [])
@@ -594,7 +616,7 @@ def smart_generate_image(prompt: str, aspect_ratio: str = "1:1",
                 max_attempts=2
             )
         except Exception as e:
-            st.warning(f"⚠️ Fal.ai: {e} — جاري المحاولة مع Gemini...")
+            st.warning(f"⚠️ Fal.ai: {e} — جاري المحاولة مع Gemini Imagen...")
 
     if secrets["gemini"]:
         try:
@@ -603,7 +625,13 @@ def smart_generate_image(prompt: str, aspect_ratio: str = "1:1",
                 max_attempts=2
             )
         except Exception as e:
-            raise Exception(f"فشل توليد الصورة: {e}")
+            err = str(e)
+            if "404" in err or "غير متاح" in err:
+                raise Exception(
+                    f"⚠️ Gemini Imagen: {err} — "
+                    f"يمكنك تغيير الموديل عبر إعداد GEMINI_IMAGEN_MODEL في secrets"
+                )
+            raise Exception(f"فشل توليد الصورة عبر Gemini Imagen: {e}")
 
     raise ValueError("لا يوجد مفتاح API للصور. أضف FAL_API_KEY أو GEMINI_API_KEY في الإعدادات.")
 
@@ -665,9 +693,17 @@ def generate_three_mandatory_sizes(info: dict, outfit: str = "suit",
 
 
 # ─── Luma Dream Machine Video ─────────────────────────────────────────────────
+LUMA_MODELS = {
+    "luma-photon":       "Luma Photon (موصى به)",
+    "luma-photon-flash": "Luma Photon Flash (سريع)",
+    "ray-2":             "Ray 2 (جودة عالية)",
+    "ray-1-6":           "Ray 1.6",
+}
+
 def generate_video_luma(prompt: str, aspect_ratio: str = "9:16",
                          duration: int = 5, image_url: str = None,
-                         image_bytes: bytes = None, loop: bool = False) -> dict:
+                         image_bytes: bytes = None, loop: bool = False,
+                         model: str = LUMA_DEFAULT_MODEL) -> dict:
     """توليد فيديو باستخدام Luma Dream Machine"""
     secrets = _get_secrets()
     if not secrets["luma"]:
@@ -687,6 +723,7 @@ def generate_video_luma(prompt: str, aspect_ratio: str = "9:16",
     ratio = luma_ratio_map.get(aspect_ratio, "9:16")
 
     payload = {
+        "model": model,
         "prompt": prompt,
         "aspect_ratio": ratio,
         "loop": loop,
