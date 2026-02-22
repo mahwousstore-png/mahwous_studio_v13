@@ -393,17 +393,17 @@ html_content = f"""<!DOCTYPE html>
       <div class="platform-card">
         <div class="platform-label">📸 Instagram Post (1:1)</div>
         <div class="platform-size">1080×1080 — مهووس مع العطر في المتجر</div>
-        <div class="prompt-box">{prompts['instagram_post']['prompt'][:500]}...</div>
+        <div class="prompt-box">{prompts['post_1_1']['prompt'][:500]}...</div>
       </div>
       <div class="platform-card">
         <div class="platform-label">📱 Instagram Story (9:16)</div>
         <div class="platform-size">1080×1920 — مهووس مع العطر في الاستديو</div>
-        <div class="prompt-box">{prompts['instagram_story']['prompt'][:500]}...</div>
+        <div class="prompt-box">{prompts['story_9_16']['prompt'][:500]}...</div>
       </div>
       <div class="platform-card">
         <div class="platform-label">🐦 Twitter/X (16:9)</div>
         <div class="platform-size">1200×675 — مهووس مع العطر على السطح</div>
-        <div class="prompt-box">{prompts['twitter']['prompt'][:500]}...</div>
+        <div class="prompt-box">{prompts['wide_16_9']['prompt'][:500]}...</div>
       </div>
     </div>
   </div>
@@ -465,9 +465,9 @@ print(f"  ✅ تقرير HTML محفوظ: test_output/content_report.html")
 print("\n" + "=" * 70)
 print("📊 ملخص النتائج النهائية")
 print("=" * 70)
-print(f"✅ برومت Instagram Post (1080×1080 | 1:1): {len(prompts['instagram_post']['prompt'])} حرف")
-print(f"✅ برومت Instagram Story (1080×1920 | 9:16): {len(prompts['instagram_story']['prompt'])} حرف")
-print(f"✅ برومت Twitter (1200×675 | 16:9): {len(prompts['twitter']['prompt'])} حرف")
+print(f"✅ برومت Instagram Post (1080×1080 | 1:1): {len(prompts['post_1_1']['prompt'])} حرف")
+print(f"✅ برومت Instagram Story (1080×1920 | 9:16): {len(prompts['story_9_16']['prompt'])} حرف")
+print(f"✅ برومت Twitter (1200×675 | 16:9): {len(prompts['wide_16_9']['prompt'])} حرف")
 print(f"✅ برومت فيديو عمودي (9:16 | TikTok/Reels): {len(video_prompts['vertical_9x16']['prompt'])} حرف")
 print(f"✅ برومت فيديو أفقي (16:9 | YouTube): {len(video_prompts['horizontal_16x9']['prompt'])} حرف")
 print(f"{'✅' if captions else '❌'} التعليقات (3 منصات): {'نجح' if captions else 'فشل'}")
