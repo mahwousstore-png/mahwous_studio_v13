@@ -20,8 +20,8 @@ from modules.ai_engine import (
     generate_video_fal, check_fal_video_status,
     generate_image_gemini, smart_generate_image, generate_perfume_story,
     build_manual_info, build_video_prompt,
-    send_to_make, build_make_payload,
-    generate_trend_insights,
+    send_to_make, build_make_payload, i
+    analyze_competitor, generate_image_remix_fal,
     load_asset_bytes,
     generate_concurrent_images, generate_voiceover_elevenlabs,
     PLATFORMS, MAHWOUS_OUTFITS, FAL_VIDEO_MODELS, _get_secrets
@@ -230,20 +230,10 @@ def _info_card(info: dict):
 # ─── Platform Selector ────────────────────────────────────────────────────────
 def platform_selector() -> list:
     if "selected_platforms" not in st.session_state:
-        st.session_state.selected_platforms = list(PLATFORMS.keys())
-
-    c1, c2 = st.columns(2)
-    if c1.button("✅ تحديد الكل", use_container_width=True, key="sel_all"):
-        st.session_state.selected_platforms = list(PLATFORMS.keys())
-        st.rerun()
-    if c2.button("🗑️ مسح الكل", use_container_width=True, key="clr_all"):
-        st.session_state.selected_platforms = []
-        st.rerun()
-
-    cols = st.columns(len(PLATFORMS))
+        st.session_state.selected_platforms = ["post st.rerun()
+    if c2.button("🗑️ مسح الكل", use_contat.rols = st.columns(len(PLATFORMS))
     for col, key in zip(cols, PLATFORMS.keys()):
-        plat = PLATFORMS[key]
-        is_sel = key in st.session_state.selected_platforms
+        plat = PLATFORMS[key]te.selected_platforms
         if col.button(
             f"{plat['emoji']} {'✓' if is_sel else '○'}",
             key=f"plat_{key}",
@@ -346,7 +336,7 @@ def _show_video_generation_tab(perfume_info: dict):
         provider_options = ["luma"]
 
     # إعدادات الفيديو
-    vc1, vc2, vc3 = st.columns(3)
+    vc1, vc2 = st.columns(2)
     with vc1:
         video_provider = st.selectbox(
             "🎬 منصة التوليد",
@@ -357,16 +347,8 @@ def _show_video_generation_tab(perfume_info: dict):
     with vc2:
         video_duration = st.select_slider(
             "⏱️ مدة الفيديو",
-            options=[5, 7, 10, 15],
-            value=7,
+            ps=[5, 7, 10,  
             key="video_duration"
-        )
-    with vc3:
-        video_aspect = st.selectbox(
-            "📐 نسبة العرض",
-            options=["9:16", "16:9", "1:1"],
-            index=0,
-            key="video_aspect"
         )
 
     # نموذج Fal.ai (يظهر فقط عند اختيار Fal)
@@ -378,14 +360,7 @@ def _show_video_generation_tab(perfume_info: dict):
             key="fal_video_model",
             help="Kling: أفضل للفيديو الاحترافي · Veo: جودة عالية · SVD: سريع وخفيف"
         )
-    else:
-        fal_video_model = "kling"
-
-    vr1, vr2 = st.columns(2)
-    with vr1:
-        video_scene = st.selectbox(
-            "🎭 المكان",
-            options=["store", "beach", "desert", "studio", "garden", "rooftop", "car"],
+    else: sceo"beach", "desert", "studio", "garden", "rooftop", "car"],
             format_func=lambda x: {
                 "store": "🏪 متجر العطور", "beach": "🌅 شاطئ الغروب",
                 "desert": "🏜️ صحراء ذهبية", "studio": "🎬 استديو فاخر",
@@ -400,7 +375,8 @@ def _show_video_generation_tab(perfume_info: dict):
             options=list(MAHWOUS_OUTFITS.keys()),
             format_func=lambda x: {
                 "suit": "🤵 البدلة الفاخرة", "hoodie": "🏆 الهودي الأيقوني",
-                "thobe": "👘 الثوب الملكي", "casual": "👕 الكاجوال الأنيق"
+                "thobe": "👘 الثوب الملكي", "casual": "👕 الكاجوال الأنيق",
+                "western": "🤠 غربي (Leather) 🆕"
             }.get(x, x),
             key="video_outfit"
         )
@@ -412,37 +388,26 @@ def _show_video_generation_tab(perfume_info: dict):
         key="video_scene_type"
     )
 
-    video_camera = st.selectbox(
-        "📷 حركة الكاميرا",
-        options=["push_in", "zoom", "orbit", "static", "low_rise", "dolly", "crane"],
-        format_func=lambda x: {
-            "push_in": "Push In — اقتراب سينمائي", "zoom": "Zoom — تكبير تدريجي",
-            "orbit": "Orbit — دوران حول الشخصية", "static": "Static — ثابت قوي",
-            "low_rise": "Low Rise — زاوية منخفضة بطولية", "dolly": "Dolly — تتبع جانبي",
-            "crane": "Crane — هبوط من الأعلى"
-        }.get(x, x),
-        key="video_camera"
-    )
+    # إعدادات متقدمة (مخفية لتسهيل التجربة)
+    with st.expander("⚙️ إعدادات متقدمة (الكاميرا، الأبعاد، الإضافات)"):
+        ac1, ac2 = st.columns(2)
+        with ac1:
+            video_aspect = st.selectbox("📐 نسبة العرض", ["9:16", "16:9", "1:1"], index=0, key="video_aspect")
+        with ac2:
+                "📷 حركة الكاميرا",
+                options=["push_in", "zoom", "orbit", "static", "low_rise", "dolly", "crane"],
+                format_func=lambda x: {
+                    "push_in": "Push In — اقتراب", "zoom": "Zoom — تكبير",
+                    "orbit": "Orbit — دوران", "static": "Static — ثابت",
+                    "low_rise": "Low Rise — من الأسفل", "dolly": "Dolly — تتبع",
+                    "crane": "Crane — من الأعلى"
+                }.get(x, x),
+                key="video_camera"
+            )
+        video_extra = st.text_input("✨ إضافات خاصة", placeholder="مثال: مطر ذهبي، بتلات ورد...", key="video_extra")
 
-    video_extra = st.text_input(
-        "✨ إضافات خاصة (اختياري)",
-        placeholder="مثال: golden rain effect, rose petals falling, Ramadan lanterns",
-        key="video_extra"
-    )
-
-    # مصدر الصورة المرجعية للفيديو
-    has_char_ref = bool(st.session_state.get("char_reference_bytes"))
-    ref_src_options = ["none", "video_upload"] + (["char_ref"] if has_char_ref else [])
-    ref_src_labels  = {
-        "none":         "بدون مرجع",
-        "video_upload": "رفع صورة جديدة",
-        "char_ref":     "مرجع مهووس المحدد",
-    }
-    video_ref_source = st.selectbox(
-        "🖼️ مصدر الصورة المرجعية (image-to-video)",
-        options=ref_src_options,
-        format_func=lambda k: ref_src_labels.get(k, k),
-        key="video_ref_source",
+e", "video_upload"] + (["char_ref"] if has_char_ref else [])
+ref_    key="video_ref_source",
         help="استخدم مرجع الشخصية المُختار أو ارفع صورة خاصة بالفيديو"
     )
 
@@ -459,13 +424,7 @@ def _show_video_generation_tab(perfume_info: dict):
     video_prompt = build_video_prompt(
         perfume_info,
         scene=video_scene,
-        outfit=video_outfit,
-        duration=video_duration,
-        camera_move=video_camera,
-        scene_type=video_scene_type,
-        mood_extra=video_extra
-    )
-
+        outfit=video_outfit,v
     with st.expander("👁️ معاينة برومت الفيديو"):
         st.markdown(f'<div class="flow-prompt">{video_prompt}</div>', unsafe_allow_html=True)
         if st.button("📋 نسخ البرومت", key="copy_vid_prompt"):
@@ -651,14 +610,9 @@ def _show_single_image_tab(perfume_info: dict):
     si1, si2 = st.columns(2)
     with si1:
         img_type = st.selectbox(
-            "نوع الصورة",
-            ["مهووس مع العطر", "العطر وحده", "رمضاني"],
+            "نوع التوليد",
+            ["مهووس مع العطر", "العطر وحده", "رمضاني", "✨ ريمكس (تغيير الخلفية)"],
             key="single_img_type"
-        )
-        img_aspect = st.selectbox(
-            "نسبة العرض",
-            ["1:1", "9:16", "16:9", "2:3"],
-            key="single_img_aspect"
         )
     with si2:
         img_outfit = st.selectbox(
@@ -666,7 +620,8 @@ def _show_single_image_tab(perfume_info: dict):
             list(MAHWOUS_OUTFITS.keys()),
             format_func=lambda x: {
                 "suit": "🤵 البدلة", "hoodie": "🏆 الهودي",
-                "thobe": "👘 الثوب", "casual": "👕 الكاجوال"
+                "thobe": "👘 الثوب", "casual": "👕 الكاجوال",
+                "western": "🤠 غربي 🆕"
             }.get(x, x),
             key="single_img_outfit"
         )
@@ -681,18 +636,27 @@ def _show_single_image_tab(perfume_info: dict):
             key="single_img_scene"
         )
 
-    img_extra = st.text_input("✨ إضافات خاصة", placeholder="مثال: golden rain, rose petals", key="single_img_extra")
+    with st.expander("⚙️ إعدادات إضافية"):
+        img_aspect = st.selectbox(
+            "نسبة العرض",
+            ["1:1", "9:16", "16:9", "2:3"],
+            key="single_img_aspect"
+        )
+        img_extra = st.text_input("✨ إضافات خاصة", placeholder="مثال: golden rain, rose petals", key="single_img_extra")
 
-    if st.button("🎨 توليد الصورة الآن", type="primary", use_container_width=True, key="gen_single_img"):
-        from modules.ai_engine import (
-            build_mahwous_product_prompt, build_product_only_prompt,
-            build_ramadan_product_prompt
+    remix_bytes = None
+    if img_type == "✨ ريمكس (تغيير الخلفية)":
+        st.info("ℹ️ ارفع صورة ال
+            remix_bytes = remix_file.getvalue()
+            st.image(remix_bytes, width=200, caption="الأصلية")
+        remix_strength .t.bu"iucprompt
         )
         if img_type == "مهووس مع العطر":
             prompt = build_mahwous_product_prompt(perfume_info, img_outfit, img_scene, img_aspect)
         elif img_type == "العطر وحده":
             prompt = build_product_only_prompt(perfume_info, img_aspect)
-        else:
+        elif img_type == "✨ ريمكس (تغيير الخلفية)":
+            prompt = f"High quality photo of perfume bott
             prompt = build_ramadan_product_prompt(perfume_info, img_aspect)
 
         if img_extra:
@@ -700,13 +664,15 @@ def _show_single_image_tab(perfume_info: dict):
 
         with st.spinner("🎨 جاري توليد الصورة..."):
             try:
-                img_bytes = smart_generate_image(prompt, img_aspect)
+                if img_type == "✨ ريمكس (تغيير الخلفية)" and remix_bytes:
+                    img_bytes = generate_image_remix_fal(prompt, remix_bytes, remix_strength)
+                else:
+                    img_bytes = smart_generate_image(prompt, img_aspect)
             except Exception as e:
                 st.error(f"❌ فشل توليد الصورة: {e}")
                 img_bytes = None
 
-        if img_bytes:
-            st.image(img_bytes, caption=f"✅ {img_type} — {img_aspect}", use_container_width=True)
+
             st.download_button(
                 "⬇️ تحميل الصورة",
                 img_bytes,
@@ -742,8 +708,7 @@ def _show_smart_trends_panel(perfume_info: dict):
         )
 
     if refresh or not cached:
-        with st.spinner("🔍 جاري تحليل الترندات..."):
-            try:
+        with st.
                 data = generate_trend_insights(perfume_info)
                 st.session_state[product_key] = data
                 cached = data
@@ -1007,33 +972,91 @@ def _show_trends_tab(perfume_info: dict):
                     unsafe_allow_html=True
                 )
 
+    # ── جاسوس المنافسين ───────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 🕵️ جاسوس المنافسين")
+    comp_name = st.text_input("اسم المنافس أو علامته التجارية", placeholder="مثال: Arabian Oud, Chanel...")
+    if comp_name and st.button("تحليل المنافس", key="analyze_comp_btn"):
+        with st.spinner("🕵️ جاري التجسس والتحليل..."):
+            comp_data = analyze_competitor(perfume_info, comp_name)
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                st.error(f"📉 نقطة ضعفهم: {comp_data.get('competitor_weakness')}")
+                st.success(f"🚀 ميزتنا: {comp_data.get('our_advantage')}")
+            with c2:
+                st.warning(f"⚔️ زاوية الهجوم: {comp_data.get('attack_angle')}")
+                st.info(f"🎬 محتوى مقترح: {comp_data.get('suggested_content')}")
+
 
 # ─── Main Studio Page ──────────────────────────────────────────────────────────
 def show_studio_page():
     st.markdown(STUDIO_CSS, unsafe_allow_html=True)
 
+    # ─── History Sidebar (سجل التحليلات) ──────────────────────────────────────
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 📜 سجل التحليلات (History)")
+        
+        from modules.supabase_db import fetch_perfume_history
+        
+        # زر تحديث السجل
+        if st.button("🔄 تحديث السجل", key="refresh_hist", use_container_width=True):
+            st.session_state.history_items = fetch_perfume_history(15)
+        
+        # تحميل أولي للسجل إذا لم يكن موجوداً
+        if "history_items" not in st.session_state:
+            st.session_state.history_items = fetch_perfume_history(15)
+
+        if not st.session_state.history_items:
+            st.caption("لا يوجد سجل محفوظ في Supabase")
+        else:
+            for item in st.session_state.history_items:
+                # عرض اسم العطر والعلامة التجارية
+                label = f"{item.get('brand', '—')} | {item.get('product_name', '—')}"
+                if st.button(label, key=f"hist_{item.get('id')}", use_container_width=True, help=f"تاريخ: {item.get('created_at')}"):
+                    # استعادة البيانات
+                    st.session_state.input_mode = "manual"
+                    st.session_state.perfume_info_auto = {
+                        "brand": item.get("brand"),
+                        "product_name": item.get("product_name"),
+                        "type": item.get("type"),
+                        "gender": item.get("gender"),
+                        "style": item.get("style"),
+                        "mood": item.get("mood"),
+                        "notes_guess": item.get("notes"),
+                        "confidence": 1.0
+                    }
+                    st.toast(f"✅ تم استرجاع بيانات: {item.get('product_name')}")
+                    st.rerun()
+
     st.markdown("""
     <div class="studio-hero">
       <h1>🎬 استديو مهووس الذكي</h1>
       <p class="sub">توليد صور · فيديو مباشر · تعليقات · سيناريوهات · هاشتاقات · لجميع المنصات</p>
-      <div class="version-badge">v13.0 · GEMINI 2.0 + CLAUDE 3.5 + IMAGEN 3 + LUMA + RUNWAY</div>
+      <div class="version-badge">v13.1 · GEMINI 2.0 + CLAUDE 3.5 + IMAGEN 3 + LUMA + RUNWAY</div>
     </div>
     """, unsafe_allow_html=True)
 
-    secrets = _get_secrets()
-    has_gemini     = bool(secrets["gemini"])
-    has_openrouter = bool(secrets["openrouter"])
-    has_luma       = bool(secrets["luma"])
-    has_runway     = bool(secrets["runway"])
-    has_fal        = bool(secrets["fal"])
 
-    # API Status Bar
+    # عرض حالة المفاتيح مع تسمية المشكلة
+    api_keys = {
+        "Gemini": secrets.get("gemini"),
+        "OpenRouter": secrets.get("openrouter"),
+        "Luma": secrets.get("luma"),
+        "RunwayML": secrets.get("runway"),
+        "Fal.ai": secrets.get("fal"),
+        "ImgBB": secrets.get("imgbb"),
+        "ElevenLabs": secrets.get("elevenlabs"),
+    }
     api_status = []
-    api_status.append(f"{'🟢' if has_gemini else '🔴'} Gemini")
-    api_status.append(f"{'🟢' if has_openrouter else '🔴'} OpenRouter")
-    api_status.append(f"{'🟢' if has_luma else '🔴'} Luma")
-    api_status.append(f"{'🟢' if has_runway else '🔴'} RunwayML")
-    api_status.append(f"{'🟢' if has_fal else '🔴'} Fal.ai")
+    issues = []
+    for name, key in api_keys.items():
+        if key:
+            api_status.append(f"🟢 {name}")
+        else:
+            api_status.append(f"🔴 {name}")
+            issues.append(f"❌ مفتاح {name} مفقود أو غير صحيح")
     st.markdown(f"""
     <div style='background:rgba(212,175,55,0.06); border:1px solid rgba(212,175,55,0.20);
          border-radius:0.6rem; padding:0.6rem 1rem; margin-bottom:1rem;
@@ -1041,6 +1064,8 @@ def show_studio_page():
       {"".join(f"<span style='color:#D4B870; font-size:0.85rem; font-weight:700;'>{s}</span>" for s in api_status)}
     </div>
     """, unsafe_allow_html=True)
+    if issues:
+        st.error("<br>".join(issues), unsafe_allow_html=True)
 
     if not has_gemini:
         st.markdown("<div class='warning-box'>⚠️ <strong>GEMINI_API_KEY</strong> غير موجود — توليد الصور وتحليلها معطل. أضفه في الإعدادات</div>", unsafe_allow_html=True)
@@ -1056,7 +1081,6 @@ def show_studio_page():
         is_img = st.session_state.input_mode == "image"
         if st.button(
             f"📸  رفع صورة العطر\n{'← محدد' if is_img else 'انقر للاختيار'}",
-            use_container_width=True,
             type="primary" if is_img else "secondary",
             key="mode_image"
         ):
@@ -1065,7 +1089,7 @@ def show_studio_page():
     with mode_col2:
         is_man = st.session_state.input_mode == "manual"
         if st.button(
-            f"⌨️  إدخال البيانات يدوياً\n{'← محدد' if is_man else 'انقر للاختيار'}",
+            f"🔗  رابط المنتج / يدوي\n{'← محدد' if is_man else 'انقر للاختيار'}",
             use_container_width=True,
             type="primary" if is_man else "secondary",
             key="mode_manual"
@@ -1085,7 +1109,7 @@ def show_studio_page():
         col_img, col_char = st.columns([1, 1])
         with col_img:
             uploaded = st.file_uploader(
-                "📸 ارفع صورة العطر (JPG/PNG/WEBP)",
+                "📸 ارفع صورة العطر (يفضل خلفية بيضاء)",
                 type=["jpg", "jpeg", "png", "webp"],
                 label_visibility="collapsed",
                 key="perfume_upload"
@@ -1095,7 +1119,7 @@ def show_studio_page():
                 image_bytes = uploaded.getvalue()
 
         with col_char:
-            st.markdown("**⚙️ إعدادات الجلسة**")
+            st.markdown("**👤 شخصية مهووس (Brand Identity)**")
 
             # ── مرجع شخصية مهووس المدمج ──────────────────────────
             BUILTIN_REFS = {
@@ -1112,8 +1136,7 @@ def show_studio_page():
                 options=list(BUILTIN_REFS.keys()),
                 format_func=lambda k: BUILTIN_REFS[k][0],
                 key="char_ref_choice",
-                help="اختر مرجعاً مدمجاً أو ارفع صورتك الخاصة"
-            )
+                help=
 
             if ref_choice == "upload":
                 char_img = st.file_uploader(
@@ -1134,7 +1157,6 @@ def show_studio_page():
                 ref_bytes = load_asset_bytes(asset_path)
                 if ref_bytes:
                     st.image(ref_bytes, caption=f"✅ {BUILTIN_REFS[ref_choice][0]}", use_container_width=True)
-                    st.session_state.char_reference = ref_bytes
                     st.session_state.char_reference_bytes = ref_bytes
                 else:
                     st.warning("⚠️ تعذّر تحميل الصورة المرجعية")
@@ -1145,7 +1167,6 @@ def show_studio_page():
         if not uploaded:
             _show_how_it_works()
             return
-
         # ── Auto-Analyze ──────────────────────────────────────────────────
         st.markdown("---")
         st.markdown('<div class="step-badge">③ تحليل العطر</div>', unsafe_allow_html=True)
@@ -1162,8 +1183,7 @@ def show_studio_page():
                         st.error(f"❌ فشل التحليل: {e}")
                         return
             else:
-                info = build_manual_info("عطر مهووس", "Mahwous", "EDP", "100ml",
-                                          "unisex", "luxury", ["gold", "black"],
+                info = build_manual_in["gold", "black"],
                                           "elegant luxury flacon", "فاخر وغامض", "عود وعنبر")
                 st.session_state[analyze_key] = info
 
@@ -1182,34 +1202,23 @@ def show_studio_page():
             perfume_info["bottle_shape"] = st.text_area("شكل الزجاجة", perfume_info.get("bottle_shape", ""), height=60)
             perfume_info["notes_guess"]  = st.text_input("ملاحظات العطر المتوقعة", perfume_info.get("notes_guess", ""))
 
+
     else:  # Manual mode
-        st.markdown('<div class="step-badge">② إدخال بيانات العطر</div>', unsafe_allow_html=True)
-
-        c1, c2 = st.columns(2)
-        with c1:
-            m_name   = st.text_input("🌹 اسم العطر *", placeholder="مثال: Oud for Greatness")
-            m_brand  = st.text_input("🏷️ العلامة التجارية *", placeholder="مثال: Initio")
-            m_type   = st.selectbox("📦 النوع", ["EDP", "EDT", "Parfum", "EDC", "Extrait", "Oil"])
-            m_size   = st.text_input("📏 الحجم", placeholder="100ml")
-        with c2:
-            m_gender = st.selectbox("👤 الجنس", ["masculine", "feminine", "unisex"])
-            m_style  = st.selectbox("✨ الطابع", ["luxury", "oriental", "niche", "sport", "modern", "classic"])
-            m_mood   = st.text_input("💭 المزاج", placeholder="فاخر وغامض")
-            m_notes  = st.text_input("🌿 الملاحظات المتوقعة", placeholder="عود وعنبر وفانيليا")
-        m_bottle = st.text_area("🫙 شكل الزجاجة", placeholder="زجاجة مستطيلة بغطاء ذهبي...", height=60)
-        m_colors = st.text_input("🎨 الألوان (مفصولة بفاصلة)", placeholder="gold, black, transparent")
-
-        if not m_name or not m_brand:
-            st.info("💡 أدخل اسم العطر والعلامة التجارية للمتابعة")
-            return
-
-        colors_list = [c.strip() for c in m_colors.split(",") if c.strip()] if m_colors else ["gold", "black"]
-        perfume_info = build_manual_info(m_name, m_brand, m_type, m_size,
-                                          m_gender, m_style, colors_list,
-                                          m_bottle or "elegant luxury flacon",
-                                          m_mood or "فاخر وغامض",
-                                          m_notes or "عود وعنبر")
-        _info_card(perfume_info)
+        st.markdown('<div class="step-badge">② إدخال رابط المنتج</div>', unsafe_allow_html=True)
+        product_url = st.text_input("🔗 رابط المنتج (متجر، موقع الماركة، فراغرانتيكا...)", placeholder="https://...")
+        
+        if st.button("🔍 استخراج المعلومات من الرابط", key="extract_perfume_info", use_container_width=True):
+            with st.spinner("🔍 جاري تصفح الرابط وتحليل البيانات..."):
+                info = analyze_perfume_url(product_url)
+                if info.get("success") is False:
+                    st.error(info.get("error", "لم يتم استخراج المعلومات"))
+                else:
+                    st.success("✅ تم استخراج معلومات العطر بنجاح!")
+                    st.session_state["perfume_info_auto"] = info
+                    st.rerun()
+        perfume_info = st.session_state.get("perfume_info_auto", {})
+        if perfume_info:
+            _info_card(perfume_info)
 
     if not perfume_info:
         return
@@ -1248,17 +1257,14 @@ def show_studio_page():
         st.markdown("---")
         st.markdown('<div class="step-badge">⑤ إعدادات التوليد</div>', unsafe_allow_html=True)
 
-        opt1, opt2, opt3 = st.columns(3)
-        with opt1:
-            outfit = st.selectbox(
-                "👔 الزي",
+        opt1, opt2, opt3 = st.columns(3) 
                 list(MAHWOUS_OUTFITS.keys()),
                 format_func=lambda x: {
                     "suit": "🤵 البدلة الفاخرة", "hoodie": "🏆 الهودي الأيقوني",
-                    "thobe": "👘 الثوب الملكي", "casual": "👕 الكاجوال الأنيق"
+                    "thobe": "👘 الثوب الملكي", "casual": "👕 الكاجوال الأنيق",
+                    "western": "🤠 غربي (Leather) 🆕"
                 }.get(x, x),
-                key="outfit_select"
-            )
+                key="
         with opt2:
             scene = st.selectbox(
                 "🎭 المكان",
@@ -1310,8 +1316,34 @@ def show_studio_page():
                         st.session_state.generated_images = results
                         st.session_state.gen_count = st.session_state.get("gen_count", 0) + len(selected_platforms)
                         st.success(f"✅ تم توليد {len([r for r in results.values() if r.get('bytes')])} صورة بنجاح!")
-                    except Exception as e:
-                        st.error(f"❌ خطأ في التوليد: {e}")
+                    except Exception as e: ت
+
+        # ─── زر المزامنة ───
+        if "generated_images" in st.session_state:
+            st.markdown("---")
+            sync_col1, sync_col2 = st.columns(2)
+            with sync_col1:
+                if st.button("🔗 إرسال إلى Make.com", use_container_width=True, key="sync_make"):
+                    from modules.ai_engine import send_to_make, build_make_payload
+                    payload = build_make_payload(
+                        perfume_info, 
+                        {k: "base64_data" for k in st.session_state.generated_images}, 
+                        st.session_state.get("video_url_ready", ""),
+                        st.session_state.get("captions_data", {})
+                    )
+                    res = send_to_make(payload)
+                    if res["success"]: st.success("✅ تم الإرسال لـ Make.com!")
+                    else: st.error(f"❌ فشل: {res['error']}")
+            with sync_col2:
+                if st.button("🗄️ حفظ في Supabase", use_container_width=True, key="sync_supabase"):
+                    from modules.supabase_db import save_perfume_to_supabase
+                    res = save_perfume_to_supabase(
+                        perfume_info, 
+                        st.session_state.generated_images,
+                        st.session_state.get("video_url_ready", "")
+                    )
+                    if res["success"]: st.success("✅ تم الحفظ في Supabase!")
+                    else: st.error(f"❌ فشل: {res['error']}")
 
         # عرض الصور المولدة
         if "generated_images" in st.session_state and st.session_state.generated_images:
@@ -1346,6 +1378,24 @@ def show_studio_page():
                             use_container_width=True,
                             key=f"dl_{key}"
                         )
+                        
+                        # زر رفع الدقة
+                        if st.button(f"🔍 رفع الدقة 4K", key=f"upscale_{key}", use_container_width=True):
+                            with st.spinner("✨ جاري رفع دقة الصورة وتحسين التفاصيل..."):
+                                up_res = upscale_image_fal(data["bytes"])
+                                if up_res["success"]:
+                                    st.success("تم رفع الدقة!")
+                                    st.image(up_res["bytes"], caption=f"✨ {data['label']} (Upscaled)", use_container_width=True)
+                                    st.download_button(
+                                        "⬇️ تحميل 4K",
+                                        up_res["bytes"],
+                                        f"{key}_upscaled.jpg",
+                                        "image/jpeg",
+                                        use_container_width=True,
+                                        key=f"dl_up_{key}"
+                                    )
+                                else:
+                                    st.error(f"فشل: {up_res.get('error')}")
                     col_idx += 1
 
     # ════════════════════════════════════════════════════════════
@@ -1424,7 +1474,7 @@ def show_studio_page():
                                        key="scen_scene")
         with sc2:
             scen_outfit = st.selectbox("الزي", list(MAHWOUS_OUTFITS.keys()),
-                                        format_func=lambda x: {"suit":"🤵 البدلة","hoodie":"🏆 الهودي","thobe":"👘 الثوب","casual":"👕 الكاجوال"}.get(x,x),
+                                        format_func=lambda x: {"suit":"🤵 البدلة","hoodie":"🏆 الهودي","thobe":"👘 الثوب","casual":"👕 الكاجوال","western":"🤠 غربي 🆕"}.get(x,x),
                                         key="scen_outfit")
             scen_dur = st.select_slider("المدة", [5,7,10,15], value=7, key="scen_dur")
 
@@ -1480,8 +1530,7 @@ def show_studio_page():
             else:
                 with st.spinner("🎙️ جاري توليد التعليق الصوتي..."):
                     try:
-                        audio_bytes = generate_voiceover_elevenlabs(voiceover_text)
-                        st.session_state.voiceover_bytes = audio_bytes
+                        audio_bytes = generate_voiceover_elevenlabs(voiceo
                         st.success("✅ تم توليد التعليق الصوتي!")
                     except Exception as e:
                         st.error(f"❌ فشل التوليد: {e}")

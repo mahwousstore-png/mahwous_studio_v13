@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
     menu_items={
         "Get Help": "https://mahwousstore.com",
-        "About": "مهووس AI Studio v13.0 — توليد الصور والفيديوهات بالذكاء الاصطناعي"
+        "About": "مهووس AI Studio v13.1 — توليد الصور والفيديوهات بالذكاء الاصطناعي"
     }
 )
 
@@ -140,7 +140,7 @@ def render_sidebar():
         <div style="text-align:center; padding:1.5rem 0.5rem 1rem;">
           <div style="font-size:2.8rem;">🎬</div>
           <div style="color:#FFE060; font-size:1.3rem; font-weight:900; margin:0.3rem 0;">مهووس AI Studio</div>
-          <div style="color:#906030; font-size:0.72rem; font-weight:700;">v13.0 · Powered by Gemini + Claude</div>
+          <div style="color:#906030; font-size:0.72rem; font-weight:700;">v13.1 · Powered by Gemini + Claude</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -170,29 +170,45 @@ def render_sidebar():
 
         st.markdown("---")
 
-              # API Status Quick View
-        from modules.ai_engine import _get_secrets
+        # API Status Quick View
+        from modules.ai_engine import _get_secrets, check_api_health
         secrets = _get_secrets()
 
-        st.markdown("<div style='color:#906030; font-size:0.75rem; font-weight:700; margin-bottom:0.4rem;'>حالة الاتصال</div>", unsafe_allow_html=True)
+        st.markdown("<div style='color:#906030; font-size:0.85rem; font-weight:700; margin-bottom:0.4rem;'>📡 حالة النظام</div>", unsafe_allow_html=True)
 
-        api_list = [
-            ("Gemini + Imagen 3", secrets.get("gemini", ""), "🖼️"),
-            ("OpenRouter / Claude", secrets.get("openrouter", ""), "🤖"),
-            ("Luma Dream Machine", secrets.get("luma", ""), "🎬"),
-            ("RunwayML Gen-3", secrets.get("runway", ""), "🎥"),
-            ("Fal.ai", secrets.get("fal", ""), "⚡"),
-            ("ImgBB", secrets.get("imgbb", ""), "🖼"),
-            ("ElevenLabs", secrets.get("elevenlabs", ""), "🎙️"),
-        ]
-
-        for name, key, icon in api_list:
-            status = "🟢" if key else "🔴"
+        # زر فحص الاتصال
+        if st.button("🔄 فحص الاتصال", key="check_health_btn", use_container_width=True):
+            with st.spinner("جاري الفحص..."):
+                st.session_state.api_health = check_api_health()
+        
+        health = st.session_state.get("api_health", {})
+        
+        # عرض الحالة
+        def _status_row(label, key_name, icon):
+            is_set = bool(secrets.get(key_name))
+            # إذا قمنا بالفحص، نستخدم النتيجة، وإلا نعتمد على وجود المفتاح فقط
+            if health and key_name in health:
+                is_ok = health[key_name]["ok"]
+                msg = health[key_name]["msg"]
+                color = "#34d399" if is_ok else "#ef4444"
+                status_icon = "🟢" if is_ok else "🔴"
+            else:
+                color = "#90D870" if is_set else "#707070"
+                status_icon = "🟢" if is_set else "⚪"
+                msg = "متصل" if is_set else "غير مفعل"
+            
             st.markdown(
-                f"<div style='font-size:0.78rem; padding:0.2rem 0; color:{'#90D870' if key else '#F06060'};'>"
-                f"{status} {icon} {name}</div>",
+                f"<div style='font-size:0.75rem; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.03); padding:4px 8px; border-radius:4px;'>"
+                f"<span>{icon} {label}</span>"
+                f"<span style='color:{color}; font-weight:bold;' title='{msg}'>{status_icon}</span>"
+                f"</div>", 
                 unsafe_allow_html=True
             )
+
+        _status_row("Gemini AI", "gemini", "🧠")
+        _status_row("Luma Video", "luma", "🎬")
+        _status_row("Fal.ai Img", "fal", "⚡")
+        _status_row("Claude 3.5", "openrouter", "✍️")
 
         st.markdown("---")
 
