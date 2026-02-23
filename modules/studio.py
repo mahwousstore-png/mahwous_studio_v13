@@ -1290,7 +1290,11 @@ def show_studio_page():
     </div>
     """, unsafe_allow_html=True)
     if issues:
-        st.error("<br>".join(issues), unsafe_allow_html=True)
+        st.markdown(
+            "<div style='background:rgba(239,68,68,0.12); border:1.5px solid #ef4444; border-radius:0.65rem; "
+            f"padding:0.8rem 1rem; font-weight:700; color:#FFB0B0;'>{'<br>'.join(issues)}</div>",
+            unsafe_allow_html=True
+        )
 
     if not has_gemini:
         st.markdown("<div class='warning-box'>⚠️ <strong>GEMINI_API_KEY</strong> غير موجود — توليد الصور وتحليلها معطل. أضفه في الإعدادات</div>", unsafe_allow_html=True)
