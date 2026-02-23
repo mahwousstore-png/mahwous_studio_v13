@@ -1,1567 +1,985 @@
-   # ─── Analyze Perfume URL ─────────────────────────────────────────────────────
-def analyze_perfume_url(product_url: str) -> dict:
-    """
-    استخراج معلومات العطر تلقائيًا من رابط المنتج باستخدام الذكاء الاصطناعي
-    """
-    secrets = _get_secrets()
-    
-    # محاولة جلب محتوى الصفحة لتحسين الدقة
-    page_content = ""
-    try:
-        req_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-        resp = requests.get(product_url, headers=req_headers, timeout=15)
-        if resp.status_code == 200:
-            # تنظيف النص من الأكواد
-            text = re.sub(r'<script.*?>.*?</script>', '', resp.text, flags=re.DOTALL)
-            text = re.sub(r'<style.*?>.*?</style>', '', text, flags=re.DOTALL)
-            text = re.sub(r'<[^>]+>', ' ', text)
-            page_content = re.sub(r'\s+', ' ', text).strip()[:15000] # أول 15000 حرف
-    except Exception:
-        pass
-
-    context = f"URL: {product_url}\nCONTENT: {page_content}" if page_content else f"URL: {product_url}"
-    
-    prompt = f"أنت خبير عطور. استخرج جميع معلومات العطر بدقة من البيانات التالية:\n{context}\n" \
-             "أعطني فقط JSON يحتوي على: product_name, brand, type, size, gender, notes, bottle_shape, bottle_material, bottle_cap, label_style, style, mood, image_url (إن وجد).\nإذا كانت المعلومات ناقصة، استنتجها بذكاء."
-
-    # المحاولة الأولى: Gemini
-    if secrets.get("gemini"):
-        headers = {"Content-Type": "application/json", "x-goog-api-key": secrets["gemini"]}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048}
-        }
-        try:
-            r = requests.post(GEMINI_VISION, headers=headers, json=payload, timeout=60)
-            r.raise_for_status()
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            return clean_json(text)
-        except Exception as e:
-            pass
-    # المحاولة الثانية: OpenRouter (Claude)
-    if secrets.get("openrouter"):
-        headers = {"Authorization": f"Bearer {secrets['openrouter']}", "Content-Type": "application/json"}
-        payload = {
-            "model": OPENROUTER_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 2048,
-            "temperature": 0.2
-        }
-        try:
-            r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=60)
-            r.raise_for_status()
-            text = r.json()["choices"][0]["message"]["content"]
-            return clean_json(text)
-        except Exception as e:
-            pass
-    return {"success": False, "error": "لم يتم استخراج معلومات العطر من الرابط تلقائيًا"}
 """
-🤖 محرك الذكاء الاصطناعي - مهووس AI Studio v13.0
-Fal.ai (Flux LoRA) + Luma Dream Machine + OpenRouter (Claude 3.5) + Make.com
+🤖 محرك الذكاء الاصطناعي — Mahwous AI Studio v13.1
+Gemini 2.0 Flash + Imagen 3 + Claude 3.5 Sonnet + Luma + RunwayML + Fal.ai + ElevenLabs
 """
 
 import streamlit as st
 import requests
-import base64
 import json
+import base64
+import os
 import time
-import re
-import io
-from datetime import datetime
-from PIL import Image
+import concurrent.futures
+from typing import Optional
 
-# ─── API Configs ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# الثوابت
+# ══════════════════════════════════════════════════════════════════════════════
+
+PLATFORMS = {
+    "instagram_post":  {"label": "Instagram Post",   "emoji": "📸", "w": 1080, "h": 1080, "aspect": "1:1"},
+    "instagram_story": {"label": "Instagram Story",  "emoji": "📱", "w": 1080, "h": 1920, "aspect": "9:16"},
+    "tiktok":          {"label": "TikTok",            "emoji": "🎵", "w": 1080, "h": 1920, "aspect": "9:16"},
+    "youtube_short":   {"label": "YouTube Short",    "emoji": "▶️", "w": 1080, "h": 1920, "aspect": "9:16"},
+    "youtube_thumb":   {"label": "YouTube Thumbnail","emoji": "🎬", "w": 1280, "h": 720,  "aspect": "16:9"},
+    "twitter":         {"label": "Twitter/X",         "emoji": "🐦", "w": 1200, "h": 675,  "aspect": "16:9"},
+    "facebook":        {"label": "Facebook",          "emoji": "👍", "w": 1200, "h": 630,  "aspect": "16:9"},
+    "snapchat":        {"label": "Snapchat",          "emoji": "👻", "w": 1080, "h": 1920, "aspect": "9:16"},
+    "linkedin":        {"label": "LinkedIn",          "emoji": "💼", "w": 1200, "h": 627,  "aspect": "16:9"},
+    "pinterest":       {"label": "Pinterest",         "emoji": "📌", "w": 1000, "h": 1500, "aspect": "2:3"},
+}
+
+MAHWOUS_OUTFITS = {
+    "suit":    "elegant black suit with golden embroidery and golden tie, luxury brand ambassador",
+    "hoodie":  "signature black hoodie with golden Mahwous logo, streetwear luxury style",
+    "thobe":   "royal white thobe with golden trim and embroidery, traditional Arab luxury",
+    "casual":  "smart casual dark outfit with golden chain accessory, modern elegant style",
+    "western": "stylish leather western jacket with dark jeans, bold masculine style",
+}
+
+FAL_VIDEO_MODELS = {
+    "kling":  "fal-ai/kling-video/v1.6/standard/image-to-video",
+    "veo":    "fal-ai/veo2",
+    "svd":    "fal-ai/stable-video",
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# الأسرار / المفاتيح
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _get_secrets() -> dict:
-    """استرجاع مفاتيح API من session_state أو st.secrets (مع تجاهل غياب secrets.toml)"""
-    def _s(session_key, secret_key, default=""):
-        # أولاً: من session_state (المُدخل يدوياً في الواجهة)
+    """جلب مفاتيح API من Streamlit secrets أو session_state"""
+    def _get(toml_key: str, session_key: str, env_key: str = "") -> str:
+        # 1) session_state
         val = st.session_state.get(session_key, "")
         if val:
             return val
-        # ثانياً: من st.secrets (إذا وُجد الملف)
+        # 2) streamlit secrets
         try:
-            return st.secrets.get(secret_key, default)
+            return st.secrets.get(toml_key, "")
         except Exception:
-            return default
-    return {
-        "fal":        _s("fal_key",        "FAL_API_KEY"),
-        "luma":       _s("luma_key",       "LUMA_API_KEY"),
-        "openrouter": _s("openrouter_key", "OPENROUTER_API_KEY"),
-        "kling":      _s("kling_key",      "KLING_API_KEY"),
-        "gemini":     _s("gemini_key",     "GEMINI_API_KEY"),
-        "runway":     _s("runway_key",     "RUNWAY_API_KEY"),
-        "webhook":    _s("webhook_url",    "MAKE_WEBHOOK_URL"),
-        "imgbb":      _s("imgbb_key",      "IMGBB_API_KEY"),
-        "elevenlabs": _s("elevenlabs_key", "ELEVENLABS_API_KEY"),
-    }
-
-
-def load_asset_bytes(relative_path: str):
-    """تحميل ملف من مجلد assets كبيانات خام (None عند الفشل)"""
-    try:
-        with open(relative_path, "rb") as f:
-            return f.read()
-    except Exception:
-        return None
-
-
-def upload_image_imgbb(image_bytes: bytes, name: str = "mahwous_image") -> dict:
-    """رفع صورة إلى ImgBB والحصول على رابط مباشر"""
-    secrets = _get_secrets()
-    if not secrets.get("imgbb"):
-        return {"success": False, "error": "IMGBB_API_KEY مفقود"}
-    b64 = base64.b64encode(image_bytes).decode()
-    try:
-        r = requests.post(
-            "https://api.imgbb.com/1/upload",
-            data={"key": secrets["imgbb"], "image": b64, "name": name},
-            timeout=30
-        )
-        r.raise_for_status()
-        data = r.json()
-        return {"success": True, "url": data["data"]["url"], "delete_url": data["data"]["delete_url"]}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def generate_voiceover_elevenlabs(text: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM") -> bytes:
-    """توليد تعليق صوتي باستخدام ElevenLabs TTS"""
-    secrets = _get_secrets()
-    if not secrets.get("elevenlabs"):
-        raise ValueError("ELEVENLABS_API_KEY مفقود — أضفه في إعدادات API")
-    headers = {
-        "xi-api-key": secrets["elevenlabs"],
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg",
-    }
-    payload = {
-        "text": text,
-        "model_id": "eleven_multilingual_v2",
-        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
-    }
-    r = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-        headers=headers,
-        json=payload,
-        timeout=60
-    )
-    r.raise_for_status()
-    return r.content
-
-
-# ─── API Health Check ─────────────────────────────────────────────────────────
-def check_api_health() -> dict:
-    """فحص حقيقي لاتصال المفاتيح وإرجاع الحالة والسبب"""
-    secrets = _get_secrets()
-    status = {}
-
-    # 1. Gemini
-    if not secrets["gemini"]:
-        status["gemini"] = {"ok": False, "msg": "المفتاح مفقود"}
-    else:
-        try:
-            # تجربة استدعاء بسيط
-            generate_text_gemini("Test", 0.1)
-            status["gemini"] = {"ok": True, "msg": "متصل (جاهز للتوليد)"}
-        except Exception as e:
-            status["gemini"] = {"ok": False, "msg": f"خطأ: {str(e)[:30]}..."}
-
-    # 2. Luma
-    if not secrets["luma"]:
-        status["luma"] = {"ok": False, "msg": "المفتاح مفقود"}
-    else:
-        # Luma لا تملك endpoint بسيط للفحص بدون تكلفة، نتحقق من التنسيق فقط أو استدعاء GET generations
-        status["luma"] = {"ok": True, "msg": "المفتاح موجود (جاهز)"}
-
-    # 3. Fal.ai
-    if not secrets["fal"]:
-        status["fal"] = {"ok": False, "msg": "المفتاح مفقود"}
-    else:
-        status["fal"] = {"ok": True, "msg": "المفتاح موجود (جاهز)"}
-
-    return status
-
-
-# ─── Model Endpoints ──────────────────────────────────────────────────────────
-OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
-
-FAL_BASE         = "https://fal.run"
-FAL_FLUX_MODEL   = "fal-ai/flux/dev"
-FAL_FLUX_LORA    = "fal-ai/flux-lora"
-
-FAL_VIDEO_MODELS = {
-    "kling": "fal-ai/kling-video/v1.6/standard/text-to-video",
-    "veo":   "fal-ai/veo2",
-    "svd":   "fal-ai/stable-video",
-}
-
-LUMA_BASE        = "https://api.lumalabs.ai/dream-machine/v1"
-LUMA_GENERATIONS = f"{LUMA_BASE}/generations"
-
-GEMINI_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_VISION    = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
-GEMINI_IMAGEN    = f"{GEMINI_BASE}/imagen-3.0-generate-001:predict"
-GEMINI_IMAGEN_DEFAULT = "imagen-3.0-generate-001"
-
-LUMA_DEFAULT_MODEL = "luma-photon"
-
-RUNWAY_BASE      = "https://api.dev.runwayml.com/v1"
-RUNWAY_GEN3      = f"{RUNWAY_BASE}/image_to_video"
-
-# ─── Platform Sizes ────────────────────────────────────────────────────────────
-PLATFORMS = {
-    "post_1_1":   {"w": 1080, "h": 1080, "label": "📸 Square (1:1)",    "aspect": "1:1",  "emoji": "📸", "fal_ratio": "1:1"},
-    "story_9_16":  {"w": 1080, "h": 1920, "label": "📱 Portrait (9:16)",  "aspect": "9:16", "emoji": "📱", "fal_ratio": "9:16"},
-    "wide_16_9":   {"w": 1280, "h": 720,  "label": "🖥️ Landscape (16:9)", "aspect": "16:9", "emoji": "🎬", "fal_ratio": "16:9"},
-}
-
-# ─── Character DNA (ثبات الشخصية) ─────────────────────────────────────────────
-MAHWOUS_DNA = """Photorealistic 3D animated character 'Mahwous' — The ULTIMATE Gulf Arab perfume expert:
-	FACE (STRICT LOCK): Black neatly styled hair swept forward with high precision. Short dark groomed beard with consistent density. Warm expressive brown eyes, thick defined eyebrows. Golden-brown skin tone. Confident, friendly, and charismatic expression.
-	STYLE: Ultra-premium 3D render (Pixar/Disney style). Cinematic lighting. High fidelity textures.
-	IDENTITY: ZERO VARIATION in facial features. He must look exactly like the reference character in every generation. Same nose, same jawline, same eyes. High-fidelity facial geometry."""
-
-MAHWOUS_OUTFITS = {
-    "suit":   "wearing elegant black luxury suit with subtle gold embroidery, crisp white shirt, gold tie — ultra-luxury formal look",
-    "hoodie": "wearing premium black oversized hoodie with gold MAHWOUS lettering embroidered on chest — contemporary street-luxury",
-    "thobe":  "wearing pristine bright white Saudi thobe with black and gold bisht cloak draped over shoulders — royal Arabian elegance",
-    "casual": "wearing relaxed white linen shirt, sleeves rolled up, casual yet refined — effortlessly stylish",
-    "western": "wearing stylish brown leather jacket, black t-shirt, dark denim jeans, modern boots — rugged masculine western chic",
-}
-
-QUALITY = """Technical specs: 4K ultra-resolution, RAW render quality.
-Lighting: 3-point cinematic — key light warm gold, fill soft, rim metallic.
-Color grade: rich warm tones, deep shadows, lifted blacks, golden highlights.
-DOF: shallow depth of field, creamy bokeh background.
-STRICT: NO TEXT anywhere, NO watermarks, NO subtitles, NO logos, NO UI elements. Clean frame only."""
-
-FAL_ASPECT_MAP = {
-    "1:1":  "square",
-    "9:16": "portrait_16_9",
-    "16:9": "landscape_16_9",
-    "2:3":  "portrait_4_3",
-    "4:3":  "landscape_4_3",
-}
-
-
-# ─── Retry Decorator ──────────────────────────────────────────────────────────
-def with_retry(func, max_attempts: int = 3, delay: float = 2.0):
-    for attempt in range(max_attempts):
-        try:
-            return func()
-        except Exception as e:
-            if attempt == max_attempts - 1:
-                raise e
-            time.sleep(delay * (attempt + 1))
-    return None
-
-
-# ─── JSON Cleaner ─────────────────────────────────────────────────────────────
-def clean_json(text: str) -> dict:
-    if not text:
-        raise ValueError("النص فارغ")
-    text = text.strip()
-    text = re.sub(r"^```(?:json)?\s*\n?", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\n?\s*```\s*$", "", text, flags=re.MULTILINE)
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
             pass
-    fixed = re.sub(r',\s*([}\]])', r'\1', text)
-    fixed = fixed.replace("'", '"')
-    try:
-        return json.loads(fixed)
-    except:
-        raise ValueError(f"فشل تحليل JSON: {text[:200]}")
+        # 3) env var
+        if env_key:
+            return os.environ.get(env_key, "")
+        return ""
 
-
-# ─── OpenRouter Text Generation ───────────────────────────────────────────────
-def generate_text_openrouter(prompt: str, system: str = None,
-                              temperature: float = 0.75, max_tokens: int = 4096) -> str:
-    secrets = _get_secrets()
-    if not secrets["openrouter"]:
-        raise ValueError("OPENROUTER_API_KEY مفقود")
-    headers = {
-        "Authorization": f"Bearer {secrets['openrouter']}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://mahwousstore.streamlit.app",
-        "X-Title": "Mahwous AI Studio v13"
-    }
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }
-    r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=90)
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
-
-
-def generate_text_gemini(prompt: str, temperature: float = 0.7) -> str:
-    secrets = _get_secrets()
-    if not secrets["gemini"]:
-        raise ValueError("GEMINI_API_KEY مفقود")
-    headers = {"Content-Type": "application/json", "x-goog-api-key": secrets["gemini"]}
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": temperature, "maxOutputTokens": 4096}
-    }
-    r = requests.post(GEMINI_VISION, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
-    data = r.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
-
-
-def generate_text_openai_compat(prompt: str, system: str = None,
-                                 temperature: float = 0.75, max_tokens: int = 4096) -> str:
-    """توليد نص عبر OpenAI-compatible API (fallback ثالث)"""
-    import os
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY غير موجود في البيئة")
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key, base_url=base_url)
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-        resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        return resp.choices[0].message.content
-    except ImportError:
-        # fallback بدون مكتبة openai
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-        payload = {"model": "gpt-4.1-mini", "messages": messages,
-                   "max_tokens": max_tokens, "temperature": temperature}
-        r = requests.post(f"{base_url}/chat/completions",
-                          headers=headers, json=payload, timeout=90)
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
-
-
-def smart_generate_text(prompt: str, system: str = None, temperature: float = 0.75) -> str:
-    """توليد نص ذكي مع fallback تلقائي: OpenRouter → Gemini → OpenAI-compat"""
-    # المحاولة 1: OpenRouter (Claude 3.5)
-    try:
-        return with_retry(lambda: generate_text_openrouter(prompt, system, temperature))
-    except Exception:
-        pass
-    # المحاولة 2: Gemini
-    try:
-        full_prompt = f"{system}\n\n{prompt}" if system else prompt
-        return with_retry(lambda: generate_text_gemini(full_prompt, temperature))
-    except Exception:
-        pass
-    # المحاولة 3: OpenAI-compatible (gpt-4.1-mini)
-    try:
-        return with_retry(lambda: generate_text_openai_compat(prompt, system, temperature))
-    except Exception as e:
-        raise Exception(f"فشل توليد النص عبر جميع النماذج (OpenRouter + Gemini + OpenAI): {e}")
-
-
-# ─── Gemini Vision: تحليل صورة العطر ─────────────────────────────────────────
-def analyze_perfume_image(image_bytes: bytes) -> dict:
-    secrets = _get_secrets()
-    if not secrets["gemini"]:
-        raise ValueError("GEMINI_API_KEY مطلوب لتحليل الصور")
-    b64 = base64.b64encode(image_bytes).decode()
-    headers = {"Content-Type": "application/json", "x-goog-api-key": secrets["gemini"]}
-    payload = {
-        "contents": [{"parts": [
-            {"inline_data": {"mime_type": "image/jpeg", "data": b64}},
-            {"text": """You are a master perfume expert. Analyze this perfume bottle image precisely.
-Return ONLY valid JSON:
-{
-  "product_name": "exact full perfume name from label",
-  "brand": "exact brand name",
-  "type": "EDP/EDT/Parfum/EDC/Extrait/Oil",
-  "size": "volume e.g. 100ml",
-  "colors": ["primary color", "secondary color", "accent color"],
-  "bottle_shape": "ultra-detailed bottle shape description",
-  "bottle_cap": "cap material, shape, color, finish",
-  "bottle_material": "glass type, finish, transparency",
-  "label_style": "label design, typography style, colors",
-  "style": "luxury/sport/modern/classic/oriental/niche",
-  "gender": "masculine/feminine/unisex",
-  "mood": "2-3 words for overall vibe",
-  "notes_guess": "top/heart/base notes guess from visual",
-  "bottle_uniqueness": "what makes this bottle distinctive",
-  "image_quality": "good/poor",
-  "confidence": 0.95
-}"""}
-        ]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1024}
-    }
-    r = requests.post(GEMINI_VISION, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
-    text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    return clean_json(text)
-
-
-# ─── Build Manual Info ────────────────────────────────────────────────────────
-def build_manual_info(product_name: str, brand: str, perfume_type: str = "EDP",
-                       size: str = "100ml", gender: str = "unisex",
-                       style: str = "luxury", colors: list = None,
-                       bottle_shape: str = "", mood: str = "",
-                       notes: str = "") -> dict:
-    """بناء معلومات العطر يدوياً"""
     return {
-        "brand": brand,
-        "product_name": product_name,
-        "type": perfume_type,
-        "size": size,
-        "gender": gender,
-        "style": style,
-        "notes_guess": notes or "عود وعنبر ومسك",
-        "mood": mood or "فاخر وغامض",
-        "colors": colors or ["gold", "black", "amber"],
-        "bottle_shape": bottle_shape or f"elegant luxury perfume bottle for {product_name} by {brand}",
-        "bottle_cap": "polished metallic cap",
-        "bottle_material": "premium crystal glass",
-        "label_style": "elegant minimalist label with brand typography",
-        "bottle_uniqueness": f"signature {brand} design",
-        "confidence": 0.8,
+        "gemini":     _get("GEMINI_API_KEY",      "gemini_key",      "GEMINI_API_KEY"),
+        "openrouter": _get("OPENROUTER_API_KEY",   "openrouter_key",  "OPENROUTER_API_KEY"),
+        "luma":       _get("LUMA_API_KEY",         "luma_key",        "LUMA_API_KEY"),
+        "runway":     _get("RUNWAY_API_KEY",        "runway_key",      "RUNWAY_API_KEY"),
+        "fal":        _get("FAL_API_KEY",           "fal_key",         "FAL_API_KEY"),
+        "imgbb":      _get("IMGBB_API_KEY",         "imgbb_key",       "IMGBB_API_KEY"),
+        "elevenlabs": _get("ELEVENLABS_API_KEY",    "elevenlabs_key",  "ELEVENLABS_API_KEY"),
+        "webhook":    _get("MAKE_WEBHOOK_URL",      "webhook_url",     "MAKE_WEBHOOK_URL"),
+        "supabase_url": _get("SUPABASE_URL",        "supabase_url",    "SUPABASE_URL"),
+        "supabase_key": _get("SUPABASE_KEY",        "supabase_key",    "SUPABASE_KEY"),
     }
 
 
-# ─── Prompt Builders ──────────────────────────────────────────────────────────
-def build_mahwous_product_prompt(info: dict, outfit: str = "suit",
-                                  scene: str = "store", platform_aspect: str = "1:1") -> str:
-    outfit_desc = MAHWOUS_OUTFITS.get(outfit, MAHWOUS_OUTFITS["suit"])
-    scenes = {
-        "store":   "Inside a breathtaking luxury dark perfume boutique — backlit golden shelves of rare fragrances, warm amber spotlights, polished obsidian floor reflecting light",
-        "beach":   "At a cinematic golden-hour beach — warm amber sky, gentle foamy waves, dramatic sunset casting long shadows",
-        "desert":  "Vast golden Arabian desert at dusk — towering dunes with razor-sharp edges, amber sky with scattered stars",
-        "studio":  "Inside a minimalist luxury dark studio — floating golden bokeh particles, dramatic rim lighting from above",
-        "garden":  "In a lush royal fragrance garden at magic hour — cascading rose petals, golden mist, ornate marble fountain",
-        "rooftop": "On a glass-barrier luxury rooftop at night — twinkling city skyline below, starry sky above",
-        "car":     "Rear seat of a Rolls-Royce Phantom — cream leather interior, city lights blurring past rain-dotted windows",
-    }
-    scene_desc = scenes.get(scene, scenes["store"])
-    product_name = info.get("product_name", "luxury perfume")
-    brand = info.get("brand", "premium brand")
-    bottle_shape = info.get("bottle_shape", "elegant glass perfume bottle")
-    bottle_cap = info.get("bottle_cap", "polished cap")
-    colors = ", ".join(info.get("colors", ["gold", "black"]))
-    uniqueness = info.get("bottle_uniqueness", "")
-    label = info.get("label_style", "elegant label")
-
-    return f"""{MAHWOUS_DNA}
-	Outfit: {outfit_desc}
-	Setting: {scene_desc}
-	
-	ACTION: He holds the perfume bottle with extreme reverence, showcasing it clearly to the camera.
-	— Product: {product_name} by {brand}
-	— Bottle: {bottle_shape}.
-	— Cap: {bottle_cap}.
-	— Colors: {colors}.
-	— Label: {label}.
-	{f"— Distinctive: {uniqueness}" if uniqueness else ""}
-	
-	ABSOLUTE BOTTLE FIDELITY: The perfume bottle MUST be an EXACT replica of the real product. 
-	- DO NOT change the shape, proportions, or label typography. 
-	- NO AI-generated 'creative' variations. 
-	- It must look like a real photograph of the bottle placed within the 3D scene.
-	- Every detail from the reference image must be preserved with 100% accuracy.
-	
-	Expression: warm expert confidence, slight knowing smile, eyes engaging camera.
-	Composition: Cinematic medium shot. Mahwous holding the bottle up to the light.
-	Aspect ratio: {platform_aspect}.
-	{QUALITY}"""
-
-
-def build_product_only_prompt(info: dict, platform_aspect: str = "1:1") -> str:
-    product_name = info.get("product_name", "luxury perfume")
-    brand = info.get("brand", "premium brand")
-    bottle_shape = info.get("bottle_shape", "elegant glass bottle")
-    bottle_cap = info.get("bottle_cap", "polished cap")
-    colors = ", ".join(info.get("colors", ["gold", "black"]))
-    material = info.get("bottle_material", "premium glass")
-    uniqueness = info.get("bottle_uniqueness", "")
-
-    return f"""Museum-quality luxury perfume product photography.
-Subject: {product_name} by {brand}
-Bottle: {bottle_shape}. Material: {material}. Cap: {bottle_cap}. Colors: {colors}.
-{f"Distinctive: {uniqueness}" if uniqueness else ""}
-
-STRICT: Reproduce the exact original bottle with zero creative liberty.
-Placement: centered on aged dark marble slab. Soft golden light from upper-right.
-Silk fabric draped elegantly beside bottle. Tiny ambient golden particles floating.
-Mood: museum-quality product shot — luxurious, aspirational, editorial.
-Aspect ratio: {platform_aspect}.
-{QUALITY}"""
-
-
-def build_ramadan_product_prompt(info: dict, platform_aspect: str = "9:16") -> str:
-    product_name = info.get("product_name", "luxury perfume")
-    brand = info.get("brand", "premium brand")
-    colors = ", ".join(info.get("colors", ["gold", "black"]))
-    return f"""Luxury Ramadan perfume advertisement.
-Subject: {product_name} by {brand} bottle. Colors: {colors}.
-Setting: Ornate Ramadan scene — glowing golden crescent moon and fanoos lantern hanging above,
-scattered rose petals and oud chips, soft warm candlelight.
-Bottle centered prominently, surrounded by tasteful Islamic geometric gold ornaments.
-Atmosphere: warm amber and deep gold tones, reverent and aspirational.
-Aspect ratio: {platform_aspect}.
-{QUALITY}"""
-
-
-def build_video_prompt(info: dict, scene: str = "store", outfit: str = "suit",
-                        duration: int = 7, camera_move: str = "push_in",
-                        scene_type: str = "مهووس مع العطر", mood_extra: str = "") -> str:
-    outfit_desc = MAHWOUS_OUTFITS.get(outfit, MAHWOUS_OUTFITS["suit"])
-    scenes = {
-        "store":   "luxury dark perfume boutique, golden backlit shelves, obsidian floor",
-        "beach":   "cinematic golden-hour beach, amber sky, foamy waves",
-        "desert":  "vast golden Arabian desert at dusk, towering dunes",
-        "studio":  "minimalist luxury dark studio, golden bokeh particles",
-        "garden":  "lush royal fragrance garden, cascading rose petals, golden mist",
-        "rooftop": "glass-barrier luxury rooftop at night, city skyline",
-        "car":     "Rolls-Royce Phantom rear seat, cream leather, city lights",
-    }
-    cameras = {
-        "push_in":  "Slow cinematic push-in toward subject",
-        "zoom":     "Gradual zoom from wide to tight close-up",
-        "orbit":    "Smooth slow orbital movement around subject",
-        "static":   "Static locked-off cinematic frame",
-        "low_rise": "Low angle slowly rising upward",
-        "dolly":    "Smooth dolly track gliding alongside",
-        "crane":    "Slow crane descent from above to eye level",
-    }
-    scene_desc = scenes.get(scene, scenes["store"])
-    camera_desc = cameras.get(camera_move, cameras["push_in"])
-    product_name = info.get("product_name", "luxury perfume")
-    brand = info.get("brand", "premium brand")
-    mood = info.get("mood", "luxurious")
-
-    if scene_type == "مهووس مع العطر":
-        subject = f"""{MAHWOUS_DNA}
-{outfit_desc}
-Mahwous holds {product_name} by {brand} bottle reverently. Warm confident expression."""
-    elif scene_type == "العطر يتكلم وحده":
-        subject = f"""The {product_name} by {brand} perfume bottle, centered and glowing with golden inner light.
-Subtle animated particles float around it. Cinematic product hero shot."""
-    else:
-        subject = f"""{MAHWOUS_DNA}
-{outfit_desc}
-Mahwous stands confidently without perfume. Charismatic presence."""
-
-    return f"""High-budget cinematic commercial. {duration} seconds.
-
-SUBJECT: {subject}
-
-SETTING: {scene_desc}
-
-CAMERA: {camera_desc}. Smooth professional movement. No shaking.
-
-MOOD: {mood}. {mood_extra if mood_extra else ""}
-
-LIGHTING: Warm golden cinematic 3-point lighting. Rich shadows. Lifted blacks.
-COLOR GRADE: Deep warm tones, golden highlights, luxury feel.
-
-STRICT RULES:
-- NO text/watermarks.
-- NO perfume spraying. Replace with: golden luminous particles floating gently.
-- Mahwous mouth CLOSED when perfume speaks.
-- MAINTAIN exact bottle design — photorealistic, no distortion.
-- Professional cinema quality. Smooth transitions."""
-
-
-# ─── Fal.ai Image Generation ──────────────────────────────────────────────────
-def generate_image_fal(prompt: str, aspect_ratio: str = "1:1",
-                        width: int = 1080, height: int = 1080, 
-                        image_bytes: bytes = None) -> bytes:
-    """توليد صورة باستخدام Fal.ai (Flux Pro) مع دعم المرجع"""
+def check_api_health() -> dict:
+    """فحص صحة كل API"""
     secrets = _get_secrets()
-    if not secrets["fal"]:
-        raise ValueError("FAL_API_KEY مفقود — أضفه في إعدادات API")
+    results = {}
 
-    headers = {
-        "Authorization": f"Key {secrets['fal']}",
-        "Content-Type": "application/json",
-    }
+    # Gemini
+    if secrets.get("gemini"):
+        try:
+            r = requests.get(
+                f"https://generativelanguage.googleapis.com/v1beta/models?key={secrets['gemini']}",
+                timeout=8
+            )
+            results["gemini"] = {"ok": r.status_code == 200, "msg": "متصل" if r.status_code == 200 else f"خطأ {r.status_code}"}
+        except Exception as e:
+            results["gemini"] = {"ok": False, "msg": str(e)[:50]}
+    else:
+        results["gemini"] = {"ok": False, "msg": "مفتاح مفقود"}
 
-    # تحديد الأبعاد بناءً على نسبة العرض
-    size_map = {
-        "1:1":  {"width": 1024, "height": 1024},
-        "9:16": {"width": 768,  "height": 1360},
-        "16:9": {"width": 1360, "height": 768},
-        "2:3":  {"width": 832,  "height": 1216},
-    }
-    size = size_map.get(aspect_ratio, {"width": 1024, "height": 1024})
+    # Luma
+    if secrets.get("luma"):
+        try:
+            r = requests.get("https://api.lumalabs.ai/dream-machine/v1/generations",
+                             headers={"Authorization": f"Bearer {secrets['luma']}"}, timeout=8)
+            results["luma"] = {"ok": r.status_code in [200, 404], "msg": "متصل" if r.status_code in [200, 404] else f"خطأ {r.status_code}"}
+        except Exception as e:
+            results["luma"] = {"ok": False, "msg": str(e)[:50]}
+    else:
+        results["luma"] = {"ok": False, "msg": "مفتاح مفقود"}
+
+    # OpenRouter
+    if secrets.get("openrouter"):
+        try:
+            r = requests.get("https://openrouter.ai/api/v1/models",
+                             headers={"Authorization": f"Bearer {secrets['openrouter']}"}, timeout=8)
+            results["openrouter"] = {"ok": r.status_code == 200, "msg": "متصل" if r.status_code == 200 else f"خطأ {r.status_code}"}
+        except Exception as e:
+            results["openrouter"] = {"ok": False, "msg": str(e)[:50]}
+    else:
+        results["openrouter"] = {"ok": False, "msg": "مفتاح مفقود"}
+
+    # Fal
+    results["fal"] = {"ok": bool(secrets.get("fal")), "msg": "مفعّل" if secrets.get("fal") else "مفتاح مفقود"}
+
+    return results
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# تحليل صورة العطر
+# ══════════════════════════════════════════════════════════════════════════════
+
+def analyze_perfume_image(image_bytes: bytes) -> dict:
+    """تحليل صورة العطر بـ Gemini 2.0 Flash Vision"""
+    secrets = _get_secrets()
+    api_key = secrets.get("gemini")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY مفقود — أضفه في إعدادات API")
+
+    b64 = base64.b64encode(image_bytes).decode()
+    prompt = """أنت خبير تقييم عطور فاخرة. حلّل هذه الصورة وأعطني JSON فقط:
+{
+  "brand": "اسم العلامة التجارية",
+  "product_name": "اسم المنتج الكامل",
+  "type": "EDP/EDT/EDP Intense/Parfum",
+  "size": "حجم الزجاجة (مل)",
+  "gender": "masculine/feminine/unisex",
+  "style": "luxury/oriental/niche/sport/modern/classic",
+  "colors": ["#hex1", "#hex2"],
+  "bottle_shape": "وصف شكل الزجاجة بالإنجليزية",
+  "mood": "المزاج العطري المتوقع (عربي)",
+  "notes_guess": "ملاحظات العطر المتوقعة (عربي)",
+  "confidence": 0.95
+}"""
 
     payload = {
-        "prompt": prompt,
-        "image_size": size,
-        "num_inference_steps": 28,
-        "guidance_scale": 3.5,
-        "num_images": 1,
-        "enable_safety_checker": True,
-        "output_format": "jpeg",
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": "image/jpeg", "data": b64}}
+            ]
+        }],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 800}
     }
 
-    # إضافة الصورة المرجعية إذا وُجدت
-    if image_bytes:
-        imgbb_res = upload_image_imgbb(image_bytes)
-        if imgbb_res.get("success"):
-            payload["image_url"] = imgbb_res["url"]
-            payload["strength"] = 0.65  # توازن بين المرجع والبرومت
-
-    # إرسال الطلب (تغيير الموديل إلى pro للحصول على أفضل جودة)
-    r = requests.post(
-        f"{FAL_BASE}/fal-ai/flux-pro/v1.1-ultra",
-        headers=headers,
-        json=payload,
-        timeout=120
+    resp = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+        json=payload, timeout=30
     )
+    resp.raise_for_status()
+    text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    if "```" in text:
+        text = text.split("```")[1].lstrip("json").strip()
+    return json.loads(text)
 
-    if r.status_code == 200:
-        data = r.json()
-        images = data.get("images", [])
-        if images:
-            img_url = images[0].get("url", "")
-            if img_url:
-                img_r = requests.get(img_url, timeout=60)
-                img_r.raise_for_status()
-                return img_r.content
-        raise ValueError("لم يتم إرجاع صورة من Fal.ai")
 
-    # محاولة الـ queue API إذا فشل الطلب المباشر
-    elif r.status_code == 202:
-        # Async queue
-        queue_data = r.json()
-        request_id = queue_data.get("request_id", "")
-        if not request_id:
-            raise ValueError("لم يتم الحصول على request_id من Fal.ai")
-        return _poll_fal_queue(request_id, secrets["fal"])
+# ══════════════════════════════════════════════════════════════════════════════
+# توليد الصور
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _build_image_prompt(info: dict, platform_key: str, outfit: str, scene: str,
+                         include_character: bool, ramadan_mode: bool) -> str:
+    brand        = info.get("brand", "luxury brand")
+    product_name = info.get("product_name", "luxury fragrance")
+    colors       = info.get("colors", ["gold", "black"])
+    colors_str   = ", ".join(colors[:3]) if isinstance(colors, list) else "gold and black"
+    mood         = info.get("mood", "luxurious and sophisticated")
+    plat         = PLATFORMS.get(platform_key, {})
+    aspect       = plat.get("aspect", "1:1")
+    outfit_desc  = MAHWOUS_OUTFITS.get(outfit, MAHWOUS_OUTFITS["suit"])
+
+    scene_descriptions = {
+        "store":   "inside a luxury perfume boutique with golden shelves, marble floors, warm ambient lighting",
+        "beach":   "at a golden sunset beach, soft waves, sand dunes, warm orange horizon",
+        "desert":  "in a vast golden sand desert at sunset, dunes, dramatic sky",
+        "studio":  "in a professional photography studio with dramatic chiaroscuro lighting, black backdrop",
+        "garden":  "in a royal rose garden with fountains, green hedges, soft natural light",
+        "rooftop": "on the rooftop of a luxury skyscraper at night, city lights bokeh",
+        "car":     "inside the interior of a luxury sports car, leather seats, soft ambient lighting",
+    }
+    scene_desc = scene_descriptions.get(scene, "in an elegant luxury setting")
+
+    ramadan_elements = ""
+    if ramadan_mode:
+        ramadan_elements = "Ramadan Kareem atmosphere with golden crescent moon, traditional lanterns, star motifs, warm glowing lights, "
+
+    if include_character:
+        char_desc = (
+            "Mahwous, a charismatic Arab male brand ambassador with black neatly styled hair, "
+            "short trimmed brown beard, warm expressive brown eyes"
+        )
+        return (
+            f"Ultra-realistic professional commercial photo, {char_desc}, "
+            f"wearing {outfit_desc}, confidently holding the {brand} {product_name} perfume bottle, "
+            f"{scene_desc}. {ramadan_elements}"
+            f"Mood: {mood}. Colors: {colors_str}. "
+            f"Cinematic lighting, luxury advertising photography, 4K, sharp focus, "
+            f"photorealistic, aspect ratio {aspect}. "
+            f"DO NOT include any text or watermarks."
+        )
     else:
-        raise ValueError(f"خطأ Fal.ai {r.status_code}: {r.text[:300]}")
+        return (
+            f"Ultra-realistic luxury product photography of {brand} {product_name} perfume bottle, "
+            f"elegant flacon with {colors_str} color palette, {scene_desc}. "
+            f"{ramadan_elements}Mood: {mood}. "
+            f"Professional studio lighting, reflective marble surface, soft bokeh background, "
+            f"luxury brand advertisement, 4K sharp, aspect ratio {aspect}. "
+            f"DO NOT include any text or watermarks."
+        )
 
 
-def generate_image_remix_fal(prompt: str, image_bytes: bytes, strength: float = 0.75) -> bytes:
-    """توليد صورة ريمكس (Image-to-Image) باستخدام Fal.ai"""
+def generate_image_gemini(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
+    """توليد صورة بـ Imagen 3 عبر Gemini API"""
     secrets = _get_secrets()
-    if not secrets["fal"]:
-        raise ValueError("FAL_API_KEY مفقود")
-
-    headers = {
-        "Authorization": f"Key {secrets['fal']}",
-        "Content-Type": "application/json",
-    }
-
-    # رفع الصورة الأصلية
-    imgbb_res = upload_image_imgbb(image_bytes)
-    if not imgbb_res.get("success"):
-        raise ValueError("فشل رفع الصورة الأصلية للمعالجة")
-    
-    payload = {
-        "prompt": prompt,
-        "image_url": imgbb_res["url"],
-        "strength": strength, # 0.0 to 1.0 (Higher = more like prompt, Lower = more like original image)
-        "num_inference_steps": 30,
-        "guidance_scale": 3.5,
-        "enable_safety_checker": True,
-        "output_format": "jpeg"
-    }
-
-    r = requests.post(f"{FAL_BASE}/fal-ai/flux/dev/image-to-image", headers=headers, json=payload, timeout=120)
-    
-    if r.status_code == 200:
-        img_url = r.json()["images"][0]["url"]
-        return requests.get(img_url).content
-    else:
-        raise ValueError(f"خطأ Fal.ai Remix: {r.text}")
-
-
-def _poll_fal_queue(request_id: str, api_key: str, max_wait: int = 120) -> bytes:
-    """انتظار نتيجة من Fal.ai queue"""
-    headers = {
-        "Authorization": f"Key {api_key}",
-        "Content-Type": "application/json",
-    }
-    status_url = f"{FAL_BASE}/queue/requests/{request_id}/status"
-    result_url = f"{FAL_BASE}/queue/requests/{request_id}"
-
-    start = time.time()
-    while time.time() - start < max_wait:
-        r = requests.get(status_url, headers=headers, timeout=30)
-        if r.status_code == 200:
-            status_data = r.json()
-            status = status_data.get("status", "")
-            if status == "COMPLETED":
-                result_r = requests.get(result_url, headers=headers, timeout=30)
-                result_r.raise_for_status()
-                data = result_r.json()
-                images = data.get("images", [])
-                if images:
-                    img_url = images[0].get("url", "")
-                    if img_url:
-                        img_r = requests.get(img_url, timeout=60)
-                        img_r.raise_for_status()
-                        return img_r.content
-                raise ValueError("لم تُرجع Fal.ai صورة بعد الاكتمال")
-            elif status in ("FAILED", "CANCELLED"):
-                raise ValueError(f"فشل توليد الصورة في Fal.ai: {status}")
-        time.sleep(3)
-    raise TimeoutError("انتهت مهلة انتظار Fal.ai")
-
-
-def _get_gemini_imagen_endpoint() -> str:
-    """endpoint Gemini Imagen (قابل للضبط عبر GEMINI_IMAGEN_MODEL في البيئة/secrets)"""
-    import os
-    model = (
-        st.session_state.get("gemini_imagen_model", "")
-        or os.environ.get("GEMINI_IMAGEN_MODEL", "")
-        or GEMINI_IMAGEN_DEFAULT
-    )
-    return f"{GEMINI_BASE}/{model}:predict"
-
-
-def generate_image_gemini(prompt: str, aspect_ratio: str = "1:1") -> bytes:
-    """توليد صورة باستخدام Gemini Imagen 3 (بديل)"""
-    secrets = _get_secrets()
-    if not secrets["gemini"]:
+    api_key = secrets.get("gemini")
+    if not api_key:
         raise ValueError("GEMINI_API_KEY مفقود")
 
-    aspect_map = {
-        "1:1": "1:1", "9:16": "9:16", "16:9": "16:9",
-        "2:3": "3:4", "4:3": "4:3",
-    }
-    ar = aspect_map.get(aspect_ratio, "1:1")
+    aspect_map = {"1:1": "1:1", "9:16": "9:16", "16:9": "16:9", "2:3": "2:3"}
+    ar = aspect_map.get(aspect, "1:1")
 
-    endpoint = _get_gemini_imagen_endpoint()
-    headers = {"Content-Type": "application/json", "x-goog-api-key": secrets["gemini"]}
     payload = {
         "instances": [{"prompt": prompt}],
         "parameters": {
             "sampleCount": 1,
             "aspectRatio": ar,
-            "safetyFilterLevel": "block_some",
-            "personGeneration": "allow_all",
+            "safetyFilterLevel": "block_few",
+            "personGeneration": "allow_adult"
         }
     }
-    r = requests.post(endpoint, headers=headers, json=payload, timeout=120)
-    if r.status_code == 404:
-        model_name = endpoint.split("/")[-1].replace(":predict", "")
-        raise ValueError(
-            f"نموذج Gemini Imagen غير متاح ({model_name}) — "
-            f"تحقق من دعم الموديل في حسابك أو غيّر GEMINI_IMAGEN_MODEL. "
-            f"404 Not Found"
+
+    resp = requests.post(
+        f"https://us-central1-aiplatform.googleapis.com/v1/projects/gen-lang-client-0296933597/locations/us-central1/publishers/google/models/imagegeneration@006:predict",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json=payload,
+        timeout=60
+    )
+
+    # Fallback: استخدم Gemini Imagen API المباشرة
+    if resp.status_code != 200:
+        resp2 = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={api_key}",
+            json=payload,
+            timeout=60
         )
-    r.raise_for_status()
-    data = r.json()
+        if resp2.status_code == 200:
+            data = resp2.json()
+        else:
+            raise ValueError(f"Imagen API error {resp2.status_code}: {resp2.text[:300]}")
+    else:
+        data = resp.json()
+
     predictions = data.get("predictions", [])
     if not predictions:
         raise ValueError("لم يتم إرجاع صور من Imagen 3")
-    b64_data = predictions[0].get("bytesBase64Encoded", "")
-    if not b64_data:
-        raise ValueError("بيانات الصورة فارغة من Imagen 3")
-    return base64.b64decode(b64_data)
+
+    b64_img = predictions[0].get("bytesBase64Encoded") or predictions[0].get("imageBytes", "")
+    if not b64_img:
+        raise ValueError("لم يتم إرجاع بيانات الصورة")
+
+    return base64.b64decode(b64_img)
 
 
-def smart_generate_image(prompt: str, aspect_ratio: str = "1:1",
-                          width: int = 1080, height: int = 1080,
-                          image_bytes: bytes = None) -> bytes:
-    """توليد صورة ذكي: Fal.ai أولاً ثم Gemini كـ fallback"""
+def smart_generate_image(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
+    """توليد صورة ذكي: يجرب Gemini أولاً ثم Fal.ai"""
+    try:
+        return generate_image_gemini(prompt, aspect)
+    except Exception:
+        pass
+    # Fallback إلى Fal.ai
+    return _generate_image_fal_flux(prompt, aspect)
+
+
+def _generate_image_fal_flux(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
+    """توليد صورة بـ Fal.ai Flux Dev"""
     secrets = _get_secrets()
+    api_key = secrets.get("fal")
+    if not api_key:
+        raise ValueError("FAL_API_KEY مفقود")
 
-    # محاولة استخدام مرجع الشخصية من الجلسة إذا لم يتم تمرير صورة
-    ref_bytes = image_bytes or st.session_state.get("char_reference_bytes")
+    os.environ["FAL_KEY"] = api_key
 
-    # قائمة النماذج بالترتيب من الأفضل للأقل
-    gemini_models = [
-        "imagen-3.0-generate-001",
-        "imagen-2.0-generate-001",
-        "gemini-1.5-pro-vision",
-        "gemini-1.5-flash-vision",
-        "gemini-2.0-pro-vision",
-        "gemini-2.0-flash-vision"
-    ]
+    aspect_map = {"1:1": "square", "9:16": "portrait_16_9", "16:9": "landscape_16_9", "2:3": "portrait_4_3"}
+    img_size = aspect_map.get(aspect, "square")
 
-    # المحاولة الأولى: Fal.ai
-    if secrets["fal"]:
-        try:
-            return with_retry(
-                lambda: generate_image_fal(prompt, aspect_ratio, width, height, ref_bytes),
-                max_attempts=2
-            )
-        except Exception as e:
-            st.warning(f"⚠️ Fal.ai: {e} — جاري المحاولة مع Gemini Imagen...")
-
-    # المحاولة الثانية: Gemini Imagen (تجربة جميع النماذج بالترتيب)
-    if secrets["gemini"]:
-        for model in gemini_models:
-            try:
-                st.session_state["gemini_imagen_model"] = model
-                return with_retry(
-                    lambda: generate_image_gemini(prompt, aspect_ratio),
-                    max_attempts=2
-                )
-            except Exception as e:
-                err = str(e)
-                if "404" in err or "غير متاح" in err:
-                    st.warning(f"⚠️ النموذج غير متاح: {model} — جاري تجربة النموذج التالي...")
-                    continue
-                else:
-                    st.error(f"فشل توليد الصورة عبر Gemini Imagen ({model}): {e}")
-                    break
-        raise Exception("⚠️ لم يتم العثور على نموذج متاح من Gemini Imagen. يمكنك تغيير الموديل عبر إعداد GEMINI_IMAGEN_MODEL في secrets")
-
-    raise ValueError("لا يوجد مفتاح API للصور. أضف FAL_API_KEY أو GEMINI_API_KEY في الإعدادات.")
+    resp = requests.post(
+        "https://fal.run/fal-ai/flux/dev",
+        headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
+        json={"prompt": prompt, "image_size": img_size, "num_inference_steps": 28, "num_images": 1},
+        timeout=120
+    )
+    resp.raise_for_status()
+    img_url = resp.json()["images"][0]["url"]
+    img_resp = requests.get(img_url, timeout=30)
+    return img_resp.content
 
 
-# ─── Generate All Platform Images (3 مقاسات إجبارية) ─────────────────────────
-def generate_platform_images(info: dict, selected_platforms: list, outfit: str,
-                               scene: str, include_character: bool = True,
-                               progress_callback=None, ramadan_mode: bool = False) -> dict:
-    """توليد الصور لجميع المنصات المحددة"""
+def generate_platform_images(info: dict, selected_platforms: list,
+                              outfit: str = "suit", scene: str = "store",
+                              include_character: bool = True,
+                              ramadan_mode: bool = False) -> dict:
+    """توليد صور لمنصات محددة"""
     results = {}
-    total = len(selected_platforms)
-
-    for i, plat_key in enumerate(selected_platforms):
-        plat = PLATFORMS[plat_key]
-        if progress_callback:
-            progress_callback(i / total, f"⚡ توليد {plat['label']}...")
-
-        if ramadan_mode:
-            prompt = build_ramadan_product_prompt(info, plat["aspect"])
-        elif include_character:
-            prompt = build_mahwous_product_prompt(info, outfit, scene, plat["aspect"])
-        else:
-            prompt = build_product_only_prompt(info, plat["aspect"])
-
+    for platform_key in selected_platforms:
+        plat = PLATFORMS.get(platform_key, {})
+        if not plat:
+            continue
+        prompt = _build_image_prompt(info, platform_key, outfit, scene, include_character, ramadan_mode)
         try:
-            img_bytes = smart_generate_image(prompt, plat["aspect"], plat["w"], plat["h"], st.session_state.get("char_reference_bytes"))
+            img_bytes = smart_generate_image(prompt, plat.get("aspect", "1:1"))
+            results[platform_key] = {
+                "bytes": img_bytes,
+                "w": plat["w"], "h": plat["h"],
+                "label": plat["label"],
+                "emoji": plat["emoji"],
+            }
         except Exception as e:
-            img_bytes = None
-            st.error(f"❌ فشل توليد {plat['label']}: {e}")
-
-        results[plat_key] = {
-            "bytes":   img_bytes,
-            "label":   plat["label"],
-            "emoji":   plat["emoji"],
-            "w":       plat["w"],
-            "h":       plat["h"],
-            "aspect":  plat["aspect"],
-            "prompt":  prompt,
-            "success": img_bytes is not None,
-        }
-
-    if progress_callback:
-        progress_callback(1.0, "✅ اكتملت جميع الصور!")
+            results[platform_key] = {
+                "bytes": None, "error": str(e),
+                "w": plat["w"], "h": plat["h"],
+                "label": plat["label"],
+                "emoji": plat["emoji"],
+            }
     return results
 
 
-# ─── Generate 3 Mandatory Sizes ───────────────────────────────────────────────
-def generate_three_mandatory_sizes(info: dict, outfit: str = "suit",
-                                    scene: str = "store",
-                                    include_character: bool = True,
-                                    ramadan_mode: bool = False,
-                                    progress_callback=None) -> dict:
-    """توليد 3 مقاسات إجبارية: 1:1 + 9:16 + 16:9"""
-    mandatory = ["post_1_1", "story_9_16", "wide_16_9"]
-    return generate_platform_images(
-        info, mandatory, outfit, scene,
-        include_character, progress_callback, ramadan_mode
-    )
-
-
-def generate_concurrent_images(info: dict, outfit: str = "suit",
-                                scene: str = "store",
+def generate_concurrent_images(info: dict, outfit: str = "suit", scene: str = "store",
                                 include_character: bool = True,
                                 ramadan_mode: bool = False) -> dict:
-    """توليد 3 مقاسات بالتوازي باستخدام ThreadPoolExecutor"""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    """توليد صور لجميع المنصات بشكل متوازي"""
+    all_platforms = list(PLATFORMS.keys())
 
-    def _gen_one(plat_key: str) -> tuple:
-        plat = PLATFORMS[plat_key]
-        if ramadan_mode:
-            prompt = build_ramadan_product_prompt(info, plat["aspect"])
-        elif include_character:
-            prompt = build_mahwous_product_prompt(info, outfit, scene, plat["aspect"])
-        else:
-            prompt = build_product_only_prompt(info, plat["aspect"])
+    def _gen_one(platform_key):
+        plat = PLATFORMS[platform_key]
+        prompt = _build_image_prompt(info, platform_key, outfit, scene, include_character, ramadan_mode)
         try:
-            img_bytes = smart_generate_image(prompt, plat["aspect"], plat["w"], plat["h"], st.session_state.get("char_reference_bytes"))
-        except Exception:
-            img_bytes = None
-        return plat_key, {
-            "bytes":   img_bytes,
-            "label":   plat["label"],
-            "emoji":   plat["emoji"],
-            "w":       plat["w"],
-            "h":       plat["h"],
-            "aspect":  plat["aspect"],
-            "prompt":  prompt,
-            "success": img_bytes is not None,
-        }
+            img_bytes = smart_generate_image(prompt, plat.get("aspect", "1:1"))
+            return platform_key, {
+                "bytes": img_bytes,
+                "w": plat["w"], "h": plat["h"],
+                "label": plat["label"], "emoji": plat["emoji"]
+            }
+        except Exception as e:
+            return platform_key, {
+                "bytes": None, "error": str(e),
+                "w": plat["w"], "h": plat["h"],
+                "label": plat["label"], "emoji": plat["emoji"]
+            }
 
     results = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(_gen_one, key): key for key in PLATFORMS}
-        for future in as_completed(futures):
-            key, data = future.result()
-            results[key] = data
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(_gen_one, pk): pk for pk in all_platforms}
+        for future in concurrent.futures.as_completed(futures):
+            pk, data = future.result()
+            results[pk] = data
     return results
 
 
-# ─── Luma Dream Machine Video ─────────────────────────────────────────────────
-LUMA_MODELS = {
-    "luma-photon":       "Luma Photon (موصى به)",
-    "luma-photon-flash": "Luma Photon Flash (سريع)",
-    "ray-2":             "Ray 2 (جودة عالية)",
-    "ray-1-6":           "Ray 1.6",
-}
-
-LUMA_MODEL = "ray-2"
-
-def generate_video_luma(prompt: str, aspect_ratio: str = "9:16",
-                         duration: int = 5, image_url: str = None,
-                         image_bytes: bytes = None, loop: bool = False,
-                         model: str = LUMA_MODEL) -> dict:
-    """توليد فيديو باستخدام Luma Dream Machine"""
+def generate_image_remix_fal(prompt: str, image_bytes: bytes, strength: float = 0.6) -> Optional[bytes]:
+    """ريمكس صورة (تغيير الخلفية مع الحفاظ على الشكل)"""
     secrets = _get_secrets()
-    if not secrets["luma"]:
-        raise ValueError("LUMA_API_KEY مفقود — أضفه في إعدادات API")
+    api_key = secrets.get("fal")
+    if not api_key:
+        raise ValueError("FAL_API_KEY مفقود")
 
-    headers = {
-        "Authorization": f"Bearer {secrets['luma']}",
-        "Content-Type": "application/json",
-    }
+    b64 = base64.b64encode(image_bytes).decode()
+    data_uri = f"data:image/jpeg;base64,{b64}"
 
-    # تحديد نسبة العرض
-    luma_ratio_map = {
-        "9:16": "9:16",
-        "16:9": "16:9",
-        "1:1":  "1:1",
-    }
-    ratio = luma_ratio_map.get(aspect_ratio, "9:16")
+    resp = requests.post(
+        "https://fal.run/fal-ai/flux/dev/image-to-image",
+        headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
+        json={
+            "prompt": prompt,
+            "image_url": data_uri,
+            "strength": strength,
+            "num_inference_steps": 28,
+            "num_images": 1
+        },
+        timeout=120
+    )
+    resp.raise_for_status()
+    img_url = resp.json()["images"][0]["url"]
+    img_resp = requests.get(img_url, timeout=30)
+    return img_resp.content
 
-    payload = {
-        "model": model,
+
+# ══════════════════════════════════════════════════════════════════════════════
+# توليد النصوص (Claude 3.5 via OpenRouter)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _call_claude(prompt: str, max_tokens: int = 2000) -> str:
+    """استدعاء Claude 3.5 Sonnet عبر OpenRouter"""
+    secrets = _get_secrets()
+    api_key = secrets.get("openrouter")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY مفقود — أضفه في إعدادات API")
+
+    resp = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://mahwousstore.com",
+            "X-Title": "Mahwous AI Studio"
+        },
+        json={
+            "model": "anthropic/claude-3.5-sonnet",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.8
+        },
+        timeout=60
+    )
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"].strip()
+
+
+def _parse_json_response(text: str) -> dict:
+    """تحويل استجابة النص إلى JSON"""
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            if part.startswith("json"):
+                text = part[4:].strip()
+                break
+            elif "{" in part or "[" in part:
+                text = part.strip()
+                break
+    text = text.strip()
+    return json.loads(text)
+
+
+def generate_all_captions(info: dict) -> dict:
+    """توليد تعليقات لجميع المنصات"""
+    brand   = info.get("brand", "Unknown")
+    product = info.get("product_name", "Unknown")
+    mood    = info.get("mood", "فاخر")
+    notes   = info.get("notes_guess", "عود وعنبر")
+
+    prompt = f"""أنت خبير تسويق رقمي للعطور الفاخرة. اكتب تعليقات تسويقية احترافية باللغة العربية الخليجية الراقية.
+
+العطر: {brand} - {product}
+المزاج: {mood}
+الملاحظات: {notes}
+الكلمات المفتاحية للـ SEO: شراء عطور فاخرة، أفضل عطور نيش في السعودية، عطور أصلية للبيع، متجر عطور موثوق
+
+أعطني JSON فقط (بدون نص إضافي):
+{{
+  "instagram_post": {{
+    "caption": "تعليق جذاب للإنستقرام 150 كلمة يشمل قصة العطر وكلمات شرائية",
+    "hashtags": ["#عطور_فاخرة", "#شراء_عطور_فاخرة", "#BrandName"]
+  }},
+  "instagram_story": {{
+    "caption": "تعليق قصير للستوري 50 كلمة مع دعوة للشراء",
+    "hashtags": ["#عطور_فاخرة", "#شراء_عطور_فاخرة"]
+  }},
+  "tiktok": {{
+    "caption": "تعليق TikTok بأسلوب فيروسي 80 كلمة مع هوك صادم",
+    "hashtags": ["#عطور_تيك_توك", "#عطور_فاخرة"]
+  }},
+  "twitter": {{
+    "caption": "تعليق Twitter موجز 280 حرف مع هاشتاقات"
+  }},
+  "youtube_short": {{
+    "caption": "وصف YouTube Short 100 كلمة مع كلمات مفتاحية SEO"
+  }},
+  "facebook": {{
+    "caption": "تعليق Facebook 120 كلمة للجمهور الخليجي"
+  }}
+}}"""
+
+    try:
+        text = _call_claude(prompt, max_tokens=2500)
+        return _parse_json_response(text)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def generate_descriptions(info: dict) -> dict:
+    """توليد أوصاف تسويقية بأطوال مختلفة"""
+    brand   = info.get("brand", "Unknown")
+    product = info.get("product_name", "Unknown")
+    mood    = info.get("mood", "فاخر")
+    notes   = info.get("notes_guess", "")
+
+    prompt = f"""اكتب أوصافاً تسويقية للعطر التالي باللغة العربية الراقية:
+العطر: {brand} - {product} | المزاج: {mood} | الملاحظات: {notes}
+
+أعطني JSON فقط:
+{{
+  "short": "وصف قصير 30 كلمة للشبكات الاجتماعية",
+  "medium": "وصف متوسط 80 كلمة للمنتج",
+  "long": "وصف طويل 200 كلمة للموقع مع كلمات SEO (شراء عطور فاخرة، أفضل عطور نيش في السعودية)",
+  "ad": "نص إعلاني 60 كلمة مع CTA واضح",
+  "seo": {{
+    "title": "عنوان SEO للصفحة",
+    "meta": "Meta description 160 حرف",
+    "content": "محتوى SEO 150 كلمة بكلمات مفتاحية"
+  }}
+}}"""
+
+    try:
+        text = _call_claude(prompt, max_tokens=2000)
+        return _parse_json_response(text)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def generate_hashtags(info: dict) -> dict:
+    """توليد هاشتاقات منظمة"""
+    brand   = info.get("brand", "Unknown")
+    product = info.get("product_name", "Unknown")
+    gender  = info.get("gender", "unisex")
+
+    prompt = f"""اقترح هاشتاقات تسويقية للعطر: {brand} - {product} (للجنس: {gender})
+
+أعطني JSON فقط:
+{{
+  "arabic": ["#عطر_رجالي", "#عطور_فاخرة", "#عطور_راقية", "#عطور_رجالية", "#عطر_مميز"],
+  "english": ["#LuxuryFragrance", "#PerfumeCommunity", "#Perfume"],
+  "brand": ["#{brand_no_spaces}", "#MahwousStore", "#عطور_مهووس"],
+  "trending": ["#شراء_عطور_فاخرة", "#أفضل_عطور_نيش_في_السعودية", "#عطور_أصلية_للبيع", "#متجر_عطور_موثوق"]
+}}"""
+
+    try:
+        text = _call_claude(prompt, max_tokens=800)
+        return _parse_json_response(text)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def generate_scenario(info: dict, scene_type: str = "مهووس مع العطر",
+                       scene: str = "store", outfit: str = "suit",
+                       duration: int = 7) -> dict:
+    """توليد سيناريو فيديو احترافي"""
+    brand   = info.get("brand", "Unknown")
+    product = info.get("product_name", "Unknown")
+    mood    = info.get("mood", "فاخر")
+
+    prompt = f"""اكتب سيناريو فيديو احترافي {duration} ثواني للعطر: {brand} - {product}
+المزاج: {mood} | نوع المشهد: {scene_type} | الموقع: {scene} | الزي: {outfit}
+
+أعطني JSON فقط:
+{{
+  "title": "عنوان الفيديو",
+  "hook": "الهوك الصادم في أول ثانيتين",
+  "scenes": [
+    {{"time": "0-2s", "action": "وصف الحركة", "camera": "نوع اللقطة", "audio": "الصوت"}},
+    {{"time": "2-5s", "action": "وصف الحركة", "camera": "نوع اللقطة", "audio": "الصوت"}},
+    {{"time": "5-{duration}s", "action": "وصف الحركة", "camera": "نوع اللقطة", "audio": "الصوت"}}
+  ],
+  "cta": "دعوة لاتخاذ إجراء",
+  "video_prompt": "برومت الفيديو بالإنجليزية لـ Luma/RunwayML ({duration}-second cinematic video...)",
+  "flow_prompt": "برومت مختصر لـ Google Flow/Veo"
+}}"""
+
+    try:
+        text = _call_claude(prompt, max_tokens=1500)
+        return _parse_json_response(text)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def generate_perfume_story(info: dict) -> str:
+    """توليد قصة شعرية للعطر"""
+    brand   = info.get("brand", "Unknown")
+    product = info.get("product_name", "Unknown")
+    mood    = info.get("mood", "فاخر")
+    notes   = info.get("notes_guess", "")
+
+    prompt = f"""اكتب قصة شعرية راقية وجذابة عن العطر: {brand} - {product}
+المزاج: {mood} | الملاحظات: {notes}
+القصة يجب أن تكون باللغة العربية الفصيحة الراقية، 150-200 كلمة، تصف تجربة ارتداء العطر بأسلوب سردي شعري.
+لا تضف أي تعليق قبل أو بعد القصة، فقط القصة مباشرة."""
+
+    try:
+        return _call_claude(prompt, max_tokens=600)
+    except Exception as e:
+        return f"خطأ في توليد القصة: {e}"
+
+
+def analyze_competitor(info: dict, competitor_name: str) -> dict:
+    """تحليل المنافس"""
+    brand   = info.get("brand", "Unknown")
+    product = info.get("product_name", "Unknown")
+
+    prompt = f"""أنت خبير استراتيجي في تسويق العطور الفاخرة.
+قارن بين: {brand} - {product} و {competitor_name}
+
+أعطني JSON فقط:
+{{
+  "competitor_weakness": "أبرز نقطة ضعف عند المنافس",
+  "our_advantage": "أبرز ميزة تنافسية لنا",
+  "attack_angle": "زاوية الهجوم التسويقية الأمثل",
+  "suggested_content": "محتوى مقترح للتفوق على المنافس"
+}}"""
+
+    try:
+        text = _call_claude(prompt, max_tokens=600)
+        return _parse_json_response(text)
+    except Exception as e:
+        return {"competitor_weakness": "—", "our_advantage": "—", "attack_angle": "—", "suggested_content": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# توليد الفيديو
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _img_to_url_imgbb(image_bytes: bytes) -> Optional[str]:
+    """رفع الصورة إلى ImgBB والحصول على رابط"""
+    secrets = _get_secrets()
+    api_key = secrets.get("imgbb")
+    if not api_key or not image_bytes:
+        return None
+    try:
+        b64 = base64.b64encode(image_bytes).decode()
+        resp = requests.post(
+            "https://api.imgbb.com/1/upload",
+            data={"key": api_key, "image": b64},
+            timeout=30
+        )
+        if resp.status_code == 200:
+            return resp.json()["data"]["url"]
+    except Exception:
+        pass
+    return None
+
+
+def generate_video_luma(prompt: str, image_bytes: Optional[bytes] = None,
+                         duration: int = 5, aspect_ratio: str = "9:16",
+                         loop: bool = False) -> dict:
+    """توليد فيديو بـ Luma Dream Machine"""
+    secrets = _get_secrets()
+    api_key = secrets.get("luma")
+    if not api_key:
+        return {"error": "LUMA_API_KEY مفقود — أضفه في إعدادات API"}
+
+    payload: dict = {
         "prompt": prompt,
-        "aspect_ratio": ratio,
-        "loop": loop,
+        "aspect_ratio": aspect_ratio,
+        "loop": loop
     }
 
-    # إضافة صورة مرجعية إذا وُجدت (image_bytes أو image_url)
-    ref_url = image_url
-    if image_bytes and not ref_url:
-        # محاولة رفع الصورة إلى ImgBB أولاً للحصول على رابط مباشر
-        imgbb_result = upload_image_imgbb(image_bytes)
-        if imgbb_result.get("success"):
-            ref_url = imgbb_result["url"]
-        else:
-            # الرجوع إلى base64 data URI عند عدم توفر ImgBB
-            b64 = base64.b64encode(image_bytes).decode()
-            ref_url = f"data:image/jpeg;base64,{b64}"
+    if image_bytes:
+        img_url = _img_to_url_imgbb(image_bytes)
+        if img_url:
+            payload["keyframes"] = {"frame0": {"type": "image", "url": img_url}}
 
-    if ref_url:
-        payload["keyframes"] = {
-            "frame0": {
-                "type": "image",
-                "url": ref_url
-            }
-        }
-
-    r = requests.post(LUMA_GENERATIONS, headers=headers, json=payload, timeout=60)
-    if r.status_code not in (200, 201, 202):
-        return {"error": f"خطأ Luma {r.status_code}: {r.text[:200]}"}
-    data = r.json()
-    return {
-        "id": data.get("id", ""),
-        "state": data.get("state", "queued"),
-        "created_at": data.get("created_at", ""),
-    }
+    try:
+        resp = requests.post(
+            "https://api.lumalabs.ai/dream-machine/v1/generations",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=30
+        )
+        if resp.status_code in [200, 201]:
+            data = resp.json()
+            return {"id": data.get("id", ""), "state": data.get("state", "pending"), "provider": "luma"}
+        return {"error": f"Luma API error {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def check_luma_status(generation_id: str) -> dict:
-    """فحص حالة توليد الفيديو في Luma"""
+    """فحص حالة توليد Luma"""
     secrets = _get_secrets()
-    if not secrets["luma"]:
-        raise ValueError("LUMA_API_KEY مفقود")
-
-    headers = {
-        "Authorization": f"Bearer {secrets['luma']}",
-        "Content-Type": "application/json",
-    }
-    r = requests.get(f"{LUMA_GENERATIONS}/{generation_id}", headers=headers, timeout=30)
-    if r.status_code != 200:
-        return {
-            "id": generation_id,
-            "state": "error",
-            "video_url": "",
-            "failure_reason": "",
-            "error": f"خطأ Luma {r.status_code}: {r.text[:200]}",
-        }
-    data = r.json()
-    return {
-        "id": generation_id,
-        "state": data.get("state", "queued"),
-        "video_url": data.get("assets", {}).get("video", ""),
-        "thumbnail_url": data.get("assets", {}).get("thumbnail", ""),
-        "failure_reason": data.get("failure_reason", ""),
-    }
-
-
-def poll_luma_video(generation_id: str, max_wait: int = 300,
-                     progress_callback=None) -> dict:
-    """انتظار اكتمال الفيديو من Luma مع Polling"""
-    start = time.time()
-    attempt = 0
-    while time.time() - start < max_wait:
-        attempt += 1
-        try:
-            status = check_luma_status(generation_id)
-            state = status.get("state", "")
-
-            if progress_callback:
-                elapsed = int(time.time() - start)
-                progress_callback(
-                    min(elapsed / max_wait, 0.95),
-                    f"⏳ الفيديو قيد المعالجة... ({elapsed}s) — الحالة: {state}"
-                )
-
+    api_key = secrets.get("luma")
+    if not api_key or not generation_id:
+        return {"state": "error", "error": "مفتاح أو معرف مفقود"}
+    try:
+        resp = requests.get(
+            f"https://api.lumalabs.ai/dream-machine/v1/generations/{generation_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            state = data.get("state", "")
+            video_url = ""
             if state == "completed":
-                return status
-            elif state in ("failed", "cancelled", "error"):
-                raise ValueError(f"فشل توليد الفيديو: {status.get('failure_reason', status.get('error', state))}")
-
-            # انتظار تدريجي
-            wait_time = min(10 + attempt * 2, 30)
-            time.sleep(wait_time)
-        except Exception as e:
-            if "failed" in str(e).lower() or "cancelled" in str(e).lower():
-                raise
-            time.sleep(10)
-
-    raise TimeoutError(f"انتهت مهلة انتظار الفيديو ({max_wait}s)")
+                video_url = data.get("assets", {}).get("video", "")
+            return {"state": state, "video_url": video_url, "progress": data.get("progress", 0)}
+        return {"state": "error", "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"state": "error", "error": str(e)}
 
 
-# ─── RunwayML Video Generation ────────────────────────────────────────────────
-def generate_video_runway(prompt: str, image_bytes: bytes = None,
+def poll_luma_video(generation_id: str, timeout: int = 300) -> dict:
+    """انتظار اكتمال فيديو Luma"""
+    start = time.time()
+    while time.time() - start < timeout:
+        status = check_luma_status(generation_id)
+        if status.get("state") == "completed":
+            return status
+        if status.get("state") in ["failed", "error"]:
+            return status
+        time.sleep(10)
+    return {"state": "timeout", "error": "انتهت المهلة الزمنية"}
+
+
+def generate_video_runway(prompt: str, image_bytes: Optional[bytes] = None,
                            aspect_ratio: str = "9:16", duration: int = 5) -> dict:
-    """توليد فيديو باستخدام RunwayML Gen-3"""
+    """توليد فيديو بـ RunwayML Gen-3 Alpha Turbo"""
     secrets = _get_secrets()
-    if not secrets["runway"]:
-        raise ValueError("RUNWAY_API_KEY مفقود")
+    api_key = secrets.get("runway")
+    if not api_key:
+        return {"error": "RUNWAY_API_KEY مفقود — أضفه في إعدادات API"}
 
-    headers = {
-        "Authorization": f"Bearer {secrets['runway']}",
-        "Content-Type": "application/json",
-        "X-Runway-Version": "2024-11-06",
-    }
-
-    ratio_map = {"9:16": "720:1280", "16:9": "1280:720", "1:1": "960:960"}
+    ratio_map = {"9:16": "720:1280", "16:9": "1280:720", "1:1": "768:768"}
     resolution = ratio_map.get(aspect_ratio, "720:1280")
 
-    payload = {
+    payload: dict = {
         "promptText": prompt,
         "model": "gen3a_turbo",
-        "ratio": resolution,
         "duration": min(duration, 10),
+        "resolution": resolution,
+        "ratio": aspect_ratio,
     }
 
     if image_bytes:
         b64 = base64.b64encode(image_bytes).decode()
         payload["promptImage"] = f"data:image/jpeg;base64,{b64}"
 
-    r = requests.post(RUNWAY_GEN3, headers=headers, json=payload, timeout=60)
-    if r.status_code not in (200, 201, 202):
-        return {"error": f"خطأ RunwayML {r.status_code}: {r.text[:200]}"}
-    data = r.json()
-    return {
-        "id": data.get("id", ""),
-        "status": data.get("status", "PENDING"),
-    }
+    try:
+        resp = requests.post(
+            "https://api.dev.runwayml.com/v1/image_to_video",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "X-Runway-Version": "2024-11-06"
+            },
+            json=payload,
+            timeout=30
+        )
+        if resp.status_code in [200, 201]:
+            data = resp.json()
+            return {"id": data.get("id", ""), "state": "pending", "provider": "runway"}
+        return {"error": f"RunwayML API error {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
-def check_runway_status(task_id: str) -> dict:
-    """فحص حالة مهمة RunwayML"""
+def check_runway_status(generation_id: str) -> dict:
+    """فحص حالة توليد RunwayML"""
     secrets = _get_secrets()
-    if not secrets["runway"]:
-        raise ValueError("RUNWAY_API_KEY مفقود")
-
-    headers = {
-        "Authorization": f"Bearer {secrets['runway']}",
-        "X-Runway-Version": "2024-11-06",
-    }
-    r = requests.get(f"{RUNWAY_BASE}/tasks/{task_id}", headers=headers, timeout=30)
-    if r.status_code != 200:
-        return {
-            "id": task_id,
-            "state": "error",
-            "status": "FAILED",
-            "video_url": "",
-            "progress": 0,
-            "error": f"خطأ RunwayML {r.status_code}: {r.text[:200]}",
-            "failure_reason": "",
-        }
-    data = r.json()
-    raw_status = data.get("status", "PENDING")
-    # تحويل حالة RunwayML إلى صيغة موحدة مع Luma
-    state_map = {
-        "SUCCEEDED": "completed",
-        "FAILED": "failed",
-        "PENDING": "queued",
-        "RUNNING": "dreaming",
-        "THROTTLED": "queued",
-    }
-    return {
-        "id": task_id,
-        "state": state_map.get(raw_status, raw_status.lower()),
-        "status": raw_status,
-        "video_url": data.get("output", [None])[0] if data.get("output") else "",
-        "progress": data.get("progressRatio", 0),
-        "error": data.get("failure", ""),
-        "failure_reason": data.get("failure", ""),
-    }
+    api_key = secrets.get("runway")
+    if not api_key or not generation_id:
+        return {"state": "error", "error": "مفتاح أو معرف مفقود"}
+    try:
+        resp = requests.get(
+            f"https://api.dev.runwayml.com/v1/tasks/{generation_id}",
+            headers={"Authorization": f"Bearer {api_key}", "X-Runway-Version": "2024-11-06"},
+            timeout=15
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            status = data.get("status", "")
+            state_map = {"SUCCEEDED": "completed", "FAILED": "failed", "RUNNING": "processing", "PENDING": "pending"}
+            state = state_map.get(status, status.lower())
+            video_url = ""
+            if state == "completed":
+                output = data.get("output", [])
+                video_url = output[0] if output else ""
+            return {"state": state, "video_url": video_url, "progress": data.get("progressRatio", 0)}
+        return {"state": "error", "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"state": "error", "error": str(e)}
 
 
-# ─── Fal.ai Video Generation ──────────────────────────────────────────────────
 def generate_video_fal(prompt: str, model: str = "kling",
                         aspect_ratio: str = "9:16",
-                        image_bytes: bytes = None) -> dict:
-    """توليد فيديو باستخدام Fal.ai (Kling/Veo/SVD)"""
+                        image_bytes: Optional[bytes] = None) -> dict:
+    """توليد فيديو بـ Fal.ai"""
     secrets = _get_secrets()
-    if not secrets["fal"]:
-        return {"success": False, "provider": "fal", "error": "FAL_API_KEY مفقود — أضفه في إعدادات API"}
+    api_key = secrets.get("fal")
+    if not api_key:
+        return {"error": "FAL_API_KEY مفقود — أضفه في إعدادات API"}
 
+    os.environ["FAL_KEY"] = api_key
     model_id = FAL_VIDEO_MODELS.get(model, FAL_VIDEO_MODELS["kling"])
-    headers = {
-        "Authorization": f"Key {secrets['fal']}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "prompt": prompt,
-        "aspect_ratio": aspect_ratio,
-    }
-
-    if image_bytes:
-        b64 = base64.b64encode(image_bytes).decode()
-        payload["image_url"] = f"data:image/jpeg;base64,{b64}"
 
     try:
-        r = requests.post(
-            f"{FAL_BASE}/queue/submit/{model_id}",
-            headers=headers,
-            json=payload,
-            timeout=60,
+        import fal_client
+
+        args: dict = {"prompt": prompt, "aspect_ratio": aspect_ratio}
+        if image_bytes:
+            b64 = base64.b64encode(image_bytes).decode()
+            args["image_url"] = f"data:image/jpeg;base64,{b64}"
+
+        result = fal_client.run(model_id, arguments=args)
+        video_url = (
+            result.get("video", {}).get("url") or
+            result.get("video_url") or
+            result.get("url", "")
         )
-        if r.status_code not in (200, 202):
-            return {"success": False, "provider": "fal", "error": f"خطأ Fal.ai {r.status_code}: {r.text[:200]}"}
-
-        data = r.json()
-        request_id = data.get("request_id", "")
-        if not request_id:
-            return {"success": False, "provider": "fal", "error": "لم يتم الحصول على request_id من Fal.ai"}
-
-        # محاولة سريعة لمعرفة ما إذا كان الطلب قد اكتمل فوراً
-        status_r = requests.get(
-            f"{FAL_BASE}/queue/requests/{request_id}/status",
-            headers=headers,
-            timeout=15,
-        )
-        if status_r.status_code == 200 and status_r.json().get("status") == "COMPLETED":
-            result_r = requests.get(
-                f"{FAL_BASE}/queue/requests/{request_id}",
-                headers=headers,
-                timeout=30,
-            )
-            if result_r.status_code == 200:
-                rd = result_r.json()
-                video_url = (rd.get("video", {}).get("url") or rd.get("video_url") or "")
-                if video_url:
-                    return {"success": True, "provider": "fal", "state": "completed", "video_url": video_url}
-
-        return {"success": True, "provider": "fal", "state": "queued", "id": request_id}
-
+        if video_url:
+            return {"state": "completed", "video_url": video_url, "id": "fal_sync"}
+        return {"state": "error", "error": "لم يتم إرجاع فيديو"}
     except Exception as e:
-        return {"success": False, "provider": "fal", "error": str(e)}
+        return {"error": str(e)}
 
 
-def check_fal_video_status(request_id: str) -> dict:
-    """فحص حالة توليد الفيديو في Fal.ai"""
+def check_fal_video_status(generation_id: str) -> dict:
+    """فحص حالة توليد Fal (للتوافق — عادةً فوري)"""
+    return {"state": "completed", "video_url": generation_id}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# التعليق الصوتي
+# ══════════════════════════════════════════════════════════════════════════════
+
+def generate_voiceover_elevenlabs(text: str, voice_id: str = "default",
+                                   api_key: str = "") -> bytes:
+    """توليد تعليق صوتي بـ ElevenLabs"""
     secrets = _get_secrets()
-    if not secrets["fal"]:
-        return {"id": request_id, "state": "error", "video_url": "", "error": "FAL_API_KEY مفقود"}
+    key = api_key or secrets.get("elevenlabs", "")
+    if not key:
+        raise ValueError("ELEVENLABS_API_KEY مفقود — أضفه في إعدادات API")
+    if not text or not text.strip():
+        raise ValueError("النص فارغ")
 
-    headers = {
-        "Authorization": f"Key {secrets['fal']}",
-        "Content-Type": "application/json",
-    }
+    # الصوت الافتراضي
+    v_id = voice_id if voice_id and voice_id != "default" else "pNInz6obpgDQGcFmaJgB"
 
-    r = requests.get(
-        f"{FAL_BASE}/queue/requests/{request_id}/status",
-        headers=headers,
-        timeout=30,
+    resp = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{v_id}",
+        headers={"xi-api-key": key, "Content-Type": "application/json"},
+        json={
+            "text": text,
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
+        },
+        timeout=30
     )
-    if r.status_code != 200:
-        return {
-            "id": request_id,
-            "state": "error",
-            "video_url": "",
-            "error": f"خطأ Fal.ai {r.status_code}: {r.text[:200]}",
-        }
+    if resp.status_code == 200:
+        return resp.content
+    raise ValueError(f"ElevenLabs error {resp.status_code}: {resp.text[:200]}")
 
-    fal_status_map = {
-        "COMPLETED":   "completed",
-        "FAILED":      "failed",
-        "IN_PROGRESS": "dreaming",
-        "IN_QUEUE":    "queued",
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Make.com Webhook
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_make_payload(info: dict, image_urls: dict,
+                        video_url: str, captions: dict) -> dict:
+    """بناء payload لإرساله إلى Make.com"""
+    return {
+        "source": "Mahwous AI Studio v13.1",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "perfume": {
+            "brand":        info.get("brand", ""),
+            "product_name": info.get("product_name", ""),
+            "type":         info.get("type", ""),
+            "gender":       info.get("gender", ""),
+            "mood":         info.get("mood", ""),
+        },
+        "images": image_urls,
+        "video_url": video_url,
+        "captions": captions,
     }
-    raw = r.json().get("status", "IN_QUEUE")
-    state = fal_status_map.get(raw, "queued")
-
-    if state == "completed":
-        result_r = requests.get(
-            f"{FAL_BASE}/queue/requests/{request_id}",
-            headers=headers,
-            timeout=30,
-        )
-        if result_r.status_code == 200:
-            rd = result_r.json()
-            video_url = (rd.get("video", {}).get("url") or rd.get("video_url") or "")
-            return {"id": request_id, "state": "completed", "video_url": video_url, "provider": "fal"}
-        return {"id": request_id, "state": "error", "video_url": "", "error": f"خطأ في استرجاع نتيجة Fal.ai: {result_r.status_code}"}
-
-    return {"id": request_id, "state": state, "video_url": "", "provider": "fal", "progress": 0}
 
 
-# ─── Generate All Captions ────────────────────────────────────────────────────
-def generate_all_captions(info: dict) -> dict:
-    system = """أنت أفضل كاتب محتوى عطور فاخرة في الخليج العربي.
-أسلوبك: شعري، عاطفي، فاخر، مع هوك جذاب في كل منصة.
-اللغة: عربية خليجية راقية — ليست فصحى متصلبة، ليست عامية ركيكة.
-الأيقونات: استخدم إيموجي ذكي ومناسب بحد أقصى 3-4 لكل نص.
-الكلمات المفتاحية الشرائية: "شراء عطور فاخرة"، "أفضل عطور نيش"، "عطور أصلية للبيع"، "متجر عطور موثوق"."""
-
-    prompt = f"""العطر: {info.get('product_name', 'عطر فاخر')} من {info.get('brand', 'علامة مميزة')}
-النوع: {info.get('type', 'EDP')} | الجنس: {info.get('gender', 'unisex')} | الطابع: {info.get('style', 'luxury')}
-المزاج: {info.get('mood', 'فاخر وغامض')} | ملاحظات: {info.get('notes_guess', 'عود وعنبر')}
-
-اكتب Captions احترافية ومخصصة لكل منصة. أجب بـ JSON صرف فقط:
-{{
-  "instagram_post": {{"caption": "نص 120-150 كلمة شعري وجذاب", "hashtags": ["#هاشتاق × 25"]}},
-  "instagram_story": {{"caption": "نص قصير 50 كلمة + CTA", "hashtags": ["#tag1","#tag2","#tag3","#tag4","#tag5"]}},
-  "tiktok": {{"caption": "150 حرف + هوك صادم", "hashtags": ["#fyp","#viral","#عطور_فاخرة"]}},
-  "youtube_short": {{"title": "عنوان 60 حرف", "caption": "وصف 80-100 كلمة + CTA"}},
-  "youtube_thumb": {{"title": "عنوان SEO", "description": "وصف 200-250 كلمة"}},
-  "twitter": {{"caption": "نص 220 حرف + 2-3 هاشتاقات"}},
-  "facebook": {{"caption": "نص قصصي 200-280 كلمة + 5 هاشتاقات"}},
-  "snapchat": {{"caption": "نص شبابي 50-60 حرف"}},
-  "linkedin": {{"caption": "نص مهني 150-180 كلمة"}},
-  "pinterest": {{"caption": "وصف SEO 100-130 كلمة + 12 كلمة مفتاحية"}},
-  "whatsapp": {{"caption": "رسالة ودية 70-90 كلمة"}},
-  "telegram": {{"caption": "تحليل عميق 280-350 كلمة"}}
-}}"""
-
-    text = smart_generate_text(prompt, system, temperature=0.8)
-    try:
-        return clean_json(text)
-    except Exception as e:
-        return {"error": f"فشل توليد Captions: {e}"}
-
-
-def generate_descriptions(info: dict) -> dict:
-    prompt = f"""العطر: {info.get('product_name', 'عطر فاخر')} من {info.get('brand', 'علامة')}
-النوع: {info.get('type', 'EDP')} | {info.get('gender', 'unisex')} | {info.get('style', 'luxury')}
-المزاج: {info.get('mood', 'فاخر')} | الملاحظات: {info.get('notes_guess', 'عود وعنبر')}
-
-اكتب 5 أوصاف تسويقية باللغة العربية الراقية. JSON فقط:
-{{
-  "short":  "وصف 60-80 كلمة مكثف للقصص والريلز",
-  "medium": "وصف 120-150 كلمة للمنشورات الرئيسية",
-  "long":   "مقال وصفي عاطفي وشعري 260-300 كلمة",
-  "ad":     "إعلان مكثف ومقنع 30-40 كلمة",
-  "seo": {{
-    "title":    "عنوان SEO 55-60 حرف",
-    "meta":     "وصف ميتا 145-155 حرف",
-    "content":  "محتوى SEO 200-220 كلمة",
-    "keywords": ["كلمة1","كلمة2","كلمة3","كلمة4","كلمة5","كلمة6","كلمة7","كلمة8","كلمة9","كلمة10"]
-  }}
-}}"""
-    text = smart_generate_text(prompt, temperature=0.7)
-    try:
-        return clean_json(text)
-    except:
-        return {}
-
-
-def generate_hashtags(info: dict) -> dict:
-    prompt = f"""العطر: {info.get('product_name')} | {info.get('brand')} | {info.get('gender')} | {info.get('style')} | {info.get('mood')}
-
-اختر 45 هاشتاق مثالي: مزيج من الوصول العالي والمتوسط والمتخصص. JSON فقط:
-{{
-  "arabic":   ["#هاشتاق_عربي × 20 — مزيج عام ومتخصص"],
-  "english":  ["#english_hashtag × 15 — mix of high and niche"],
-  "brand":    ["#brand_specific × 5"],
-  "buying":   ["#شراء_عطور_فاخرة","#عطور_أصلية_للبيع","#متجر_عطور_موثوق","#أفضل_عطور_نيش","#عطور_نيش_السعودية"]
-}}"""
-    text = smart_generate_text(prompt, temperature=0.6)
-    try:
-        return clean_json(text)
-    except:
-        return {}
-
-
-def generate_scenario(info: dict, scenario_type: str = "مهووس مع العطر",
-                       scene: str = "store", outfit: str = "suit",
-                       duration: int = 7) -> dict:
-    """توليد سيناريو فيديو كامل مع برومت Luma/Runway"""
-    system = """أنت كاتب سيناريو إبداعي محترف لتيك توك والريلز. أسلوبك: سينمائي، مثير، يبدأ بهوك صادم."""
-
-    prompt = f"""اكتب سيناريو فيديو {duration} ثوانٍ لعطر "{info.get('product_name', 'عطر فاخر')}" من "{info.get('brand', 'علامة')}"
-نوع المشهد: {scenario_type} | المكان: {scene} | الزي: {outfit}
-المزاج: {info.get('mood', 'فاخر وغامض')} | الملاحظات: {info.get('notes_guess', 'عود وعنبر')}
-
-أجب بـ JSON صرف فقط:
-{{
-  "title": "عنوان السيناريو",
-  "hook": "الهوك الصادم في أول 3 ثوانٍ",
-  "scenes": [
-    {{"time": "0-3s", "action": "وصف الحركة", "camera": "نوع اللقطة", "audio": "الصوت/الموسيقى"}},
-    {{"time": "3-5s", "action": "وصف الحركة", "camera": "نوع اللقطة", "audio": "الصوت/الموسيقى"}},
-    {{"time": "5-7s", "action": "وصف الحركة", "camera": "نوع اللقطة", "audio": "الصوت/الموسيقى"}}
-  ],
-  "cta": "دعوة للشراء غير مباشرة",
-  "video_prompt": "برومت Luma Dream Machine بالإنجليزية",
-  "flow_prompt": "برومت Google Flow/Veo بالإنجليزية"
-}}"""
-
-    text = smart_generate_text(prompt, system, temperature=0.85)
-    try:
-        return clean_json(text)
-    except Exception as e:
-        return {
-            "title": f"سيناريو {info.get('product_name', '')}",
-            "hook": "هوك جذاب",
-            "scenes": [{"time": "0-7s", "action": text[:200], "camera": "medium shot", "audio": "موسيقى هادئة"}],
-            "cta": "اطلب الآن",
-            "video_prompt": build_video_prompt(info, scene, outfit, duration),
-            "flow_prompt": build_video_prompt(info, scene, outfit, duration),
-        }
-
-
-def generate_perfume_story(info: dict) -> str:
-    """توليد قصة عطر شعرية"""
-    prompt = f"""أنت شاعر عطور فاخر. اكتب قصة شعرية قصيرة (150-200 كلمة) عن:
-العطر: {info.get('product_name', 'عطر فاخر')} من {info.get('brand', 'علامة')}
-المزاج: {info.get('mood', 'فاخر وغامض')}
-الملاحظات: {info.get('notes_guess', 'عود وعنبر ومسك')}
-
-الأسلوب: شعري، عاطفي، يصف رحلة الرائحة من أول رشة حتى الخاتمة.
-اللغة: عربية فصحى راقية مع لمسة شعرية.
-لا تذكر أسماء جغرافية."""
-    return smart_generate_text(prompt, temperature=0.9)
-
-
-# ─── Smart Trend Insights ─────────────────────────────────────────────────────
-def generate_trend_insights(info: dict) -> dict:
-    """تحليل ذكي للترندات والمواضيع الرائجة المتعلقة بالمنتج"""
-    product_name = info.get("product_name", "عطر فاخر")
-    brand        = info.get("brand", "علامة مميزة")
-    gender       = info.get("gender", "unisex")
-    style        = info.get("style", "luxury")
-    mood         = info.get("mood", "فاخر وغامض")
-    notes        = info.get("notes_guess", "عود وعنبر")
-    perfume_type = info.get("type", "EDP")
-
-    system = """أنت خبير تسويق رقمي متخصص في العطور الفاخرة في السوق الخليجي.
-لديك معرفة عميقة بالترندات الحالية على TikTok وInstagram وTwitter في السعودية والخليج.
-مهمتك: تحليل المنتج واقتراح مواضيع ترند ذكية وأفكار محتوى فيروسي."""
-
-    prompt = f"""المنتج: {product_name} من {brand}
-النوع: {perfume_type} | الجنس: {gender} | الطابع: {style}
-المزاج: {mood} | الملاحظات: {notes}
-
-بناءً على هذا العطر، حلّل وأجب بـ JSON صرف فقط:
-{{
-  "product_summary": "جملة واحدة تصف هوية العطر بدقة",
-  "target_audience": "الجمهور المستهدف الأمثل (عمر، اهتمامات، منصة)",
-  "trending_topics": [
-    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}},
-    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}},
-    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}},
-    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}},
-    {{"topic": "موضوع الترند", "platform": "TikTok/Instagram/Twitter", "relevance": "سبب ارتباطه بالعطر", "hook": "هوك فيروسي جاهز"}}
-  ],
-  "viral_hooks": [
-    "هوك صادم للثانية الأولى #1",
-    "هوك صادم للثانية الأولى #2",
-    "هوك صادم للثانية الأولى #3"
-  ],
-  "content_angles": [
-    {{"angle": "زاوية المحتوى", "format": "ريلز/بوست/ستوري", "description": "وصف الفكرة في جملتين"}},
-    {{"angle": "زاوية المحتوى", "format": "ريلز/بوست/ستوري", "description": "وصف الفكرة في جملتين"}},
-    {{"angle": "زاوية المحتوى", "format": "ريلز/بوست/ستوري", "description": "وصف الفكرة في جملتين"}},
-    {{"angle": "زاوية المحتوى", "format": "ريلز/بوست/ستوري", "description": "وصف الفكرة في جملتين"}}
-  ],
-  "trending_hashtags": {{
-    "viral":   ["أكثر 8 هاشتاقات ترند الآن مرتبطة بالعطر"],
-    "niche":   ["8 هاشتاقات متخصصة عالية الجودة"],
-    "buying":  ["8 هاشتاقات شرائية مستهدفة لمحبي العطور الفاخرة في الخليج"]
-  }},
-  "best_post_times": {{
-    "instagram": "أفضل وقت نشر على إنستجرام (المنطقة العربية)",
-    "tiktok":    "أفضل وقت نشر على تيك توك",
-    "twitter":   "أفضل وقت نشر على تويتر"
-  }},
-  "competitor_gap": "فرصة تسويقية غير مستغلة لهذا العطر تحديداً",
-  "seasonal_angle": "زاوية موسمية أو مناسبة مرتبطة بالوقت الحالي"
-}}"""
-
-    text = smart_generate_text(prompt, system, temperature=0.75)
-    try:
-        return clean_json(text)
-    except Exception as e:
-        return {"error": f"فشل تحليل الترندات: {e}"}
-
-
-def analyze_competitor(my_product: dict, competitor_name: str) -> dict:
-    """تحليل المنافس واقتراح نقاط التفوق"""
-    system = "أنت خبير استراتيجي في تسويق العطور. حلل المنافس وقارنه بمنتجنا."
-    prompt = f"""
-    منتجنا: {my_product.get('product_name')} ({my_product.get('brand')})
-    المنافس: {competitor_name}
-    
-    أعطني تقرير JSON يحتوي على:
-    {{
-        "competitor_weakness": "نقطة ضعف محتملة في تسويق أو منتج المنافس",
-        "our_advantage": "كيف نتفوق عليهم بناءً على مواصفات عطرنا",
-        "attack_angle": "زاوية تسويقية هجومية (بأدب) لجذب جمهورهم",
-        "suggested_content": "فكرة محتوى فيديو لسحب البساط منهم"
-    }}
-    """
-    text = smart_generate_text(prompt, system, temperature=0.7)
-    try:
-        return clean_json(text)
-    except:
-        return {
-            "competitor_weakness": "تحليل عام",
-            "our_advantage": "الجودة العالية",
-            "attack_angle": "التركيز على الثبات",
-            "suggested_content": "مقارنة عمياء"
-        }
-
-# ─── Make.com Webhook Integration ─────────────────────────────────────────────
 def send_to_make(payload: dict) -> dict:
-    """إرسال البيانات إلى Make.com Webhook للنشر التلقائي"""
+    """إرسال payload إلى Make.com Webhook"""
     secrets = _get_secrets()
     webhook_url = secrets.get("webhook", "")
-
     if not webhook_url:
-        return {"success": False, "error": "MAKE_WEBHOOK_URL غير محدد في الإعدادات"}
-
+        return {"success": False, "error": "MAKE_WEBHOOK_URL غير محدد — أضفه في الإعدادات"}
     try:
-        headers = {"Content-Type": "application/json"}
-        r = requests.post(webhook_url, headers=headers, json=payload, timeout=30)
-        r.raise_for_status()
+        resp = requests.post(webhook_url, json=payload, timeout=30)
         return {
-            "success": True,
-            "status_code": r.status_code,
-            "response": r.text[:200],
+            "success": resp.status_code in [200, 201, 202, 204],
+            "status_code": resp.status_code,
+            "response": resp.text[:500]
         }
-    except requests.exceptions.RequestException as e:
-        return {"success": False, "error": str(e)}
-
-
-def build_make_payload(info: dict, image_urls: dict, video_url: str,
-                        captions: dict) -> dict:
-    """بناء الـ payload المرسل لـ Make.com"""
-    return {
-        "source": "Mahwous AI Studio v13.0",
-        "timestamp": datetime.now().isoformat(),
-        "perfume": {
-            "brand": info.get("brand", ""),
-            "product_name": info.get("product_name", ""),
-            "type": info.get("type", ""),
-            "gender": info.get("gender", ""),
-            "style": info.get("style", ""),
-            "mood": info.get("mood", ""),
-        },
-        "images": {
-            "square_1x1": image_urls.get("post_1_1", ""),
-            "portrait_9x16": image_urls.get("story_9_16", ""),
-            "landscape_16x9": image_urls.get("wide_16_9", ""),
-        },
-        "video": {
-            "url": video_url,
-            "platform": "short_video",
-        },
-        "captions": {
-            "post_1_1": captions.get("post_1_1", {}).get("caption", ""),
-            "story_9_16": captions.get("story_9_16", {}).get("caption", ""),
-            "wide_16_9": captions.get("wide_16_9", {}).get("caption", ""),
-        },
-        "seo_keywords": [
-            "شراء عطور فاخرة",
-            "أفضل عطور نيش في السعودية",
-            "عطور أصلية للبيع",
-            "متجر عطور موثوق",
-            f"{info.get('brand', '')} {info.get('product_name', '')}",
-        ],
-    }
-
-
-# ─── Image Upscaling (Fal.ai) ─────────────────────────────────────────────────
-def upscale_image_fal(image_bytes: bytes) -> dict:
-    """رفع دقة الصورة باستخدام Fal.ai (Aura SR)"""
-    secrets = _get_secrets()
-    if not secrets["fal"]:
-        return {"success": False, "error": "FAL_API_KEY مفقود"}
-
-    headers = {
-        "Authorization": f"Key {secrets['fal']}",
-        "Content-Type": "application/json",
-    }
-
-    # تحويل الصورة إلى Base64
-    b64 = base64.b64encode(image_bytes).decode()
-    payload = {
-        "image_url": f"data:image/jpeg;base64,{b64}",
-    }
-
-    try:
-        r = requests.post(
-            f"{FAL_BASE}/fal-ai/aura-sr",
-            headers=headers,
-            json=payload,
-            timeout=60
-        )
-        r.raise_for_status()
-        data = r.json()
-        if "image" in data and "url" in data["image"]:
-            img_url = data["image"]["url"]
-            img_r = requests.get(img_url, timeout=60)
-            return {"success": True, "bytes": img_r.content, "url": img_url}
-        return {"success": False, "error": "لم يتم إرجاع رابط الصورة"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# أدوات مساعدة
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_manual_info(brand: str, product_name: str, colors: list,
+                       bottle_shape: str, mood: str, notes_guess: str) -> dict:
+    """بناء معلومات العطر يدوياً"""
+    return {
+        "brand": brand,
+        "product_name": product_name,
+        "type": "EDP",
+        "gender": "unisex",
+        "style": "luxury",
+        "colors": colors or ["gold", "black"],
+        "bottle_shape": bottle_shape,
+        "mood": mood,
+        "notes_guess": notes_guess,
+        "confidence": 1.0
+    }
+
+
+def build_video_prompt(info: dict, scene: str = "store", outfit: str = "suit",
+                        camera: str = "orbit", duration: int = 7,
+                        aspect: str = "9:16", extra: str = "") -> str:
+    """بناء برومت الفيديو"""
+    brand    = info.get("brand", "luxury brand")
+    product  = info.get("product_name", "luxury fragrance")
+    mood     = info.get("mood", "luxurious and sophisticated")
+    outfit_d = MAHWOUS_OUTFITS.get(outfit, MAHWOUS_OUTFITS["suit"])
+
+    scene_map = {
+        "store":   "luxury perfume boutique with golden shelves and warm ambient lighting",
+        "beach":   "golden sunset beach with soft waves and sand dunes",
+        "desert":  "vast golden sand desert at sunset with dramatic sky",
+        "studio":  "professional photography studio with dramatic chiaroscuro lighting",
+        "garden":  "royal rose garden with fountains and soft natural light",
+        "rooftop": "rooftop of a luxury skyscraper at night with city lights bokeh",
+        "car":     "interior of a luxury sports car with leather seats"
+    }
+    scene_desc = scene_map.get(scene, "elegant luxury setting")
+
+    camera_map = {
+        "push_in":  "slow push-in cinematic camera movement",
+        "zoom":     "dramatic slow zoom",
+        "orbit":    "smooth 360-degree orbit rotation",
+        "static":   "perfectly still camera, static shot",
+        "low_rise": "low-angle rising camera movement",
+        "dolly":    "smooth dolly track movement",
+        "crane":    "crane shot from above, sweeping movement"
+    }
+    cam_desc = camera_map.get(camera, "cinematic camera movement")
+
+    prompt = (
+        f"{duration}-second cinematic {aspect} video for luxury perfume advertising. "
+        f"Mahwous, a charismatic Arab male brand ambassador with black hair, short beard, wearing {outfit_d}, "
+        f"elegantly showcasing {brand} {product} perfume in {scene_desc}. "
+        f"Camera: {cam_desc}. Mood: {mood}. "
+        f"Style: ultra-cinematic, slow-motion highlights, dramatic lighting, luxury commercial quality."
+    )
+    if extra:
+        prompt += f" Additional elements: {extra}."
+    return prompt
+
+
+def load_asset_bytes(path: str) -> Optional[bytes]:
+    """تحميل ملف asset من المسار المحلي"""
+    if not path:
+        return None
+    try:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return f.read()
+        # محاولة مسارات بديلة
+        alt_paths = [
+            path,
+            os.path.join(".", path),
+            os.path.join(os.path.dirname(__file__), "..", path),
+        ]
+        for p in alt_paths:
+            if os.path.exists(p):
+                with open(p, "rb") as f:
+                    return f.read()
+    except Exception:
+        pass
+    return None

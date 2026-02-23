@@ -1,82 +1,80 @@
 """
-🔗 Supabase Integration - Mahwous AI Studio v13.0
-تخزين بيانات العطور والمحتوى المولد في قاعدة بيانات Supabase
+🗄️ Supabase Database Module — Mahwous AI Studio v13.1
+حفظ واسترجاع بيانات العطور من Supabase
 """
 
-import os
 import requests
-import streamlit as st
-from datetime import datetime
+import json
+import time
+
 
 def _get_supabase_config():
-    """استرجاع إعدادات Supabase من session_state أو secrets"""
-    def _s(session_key, secret_key, default=""):
-        val = st.session_state.get(session_key, "")
-        if val:
-            return val
-        try:
-            return st.secrets.get(secret_key, default)
-        except Exception:
-            return default
-    return {
-        "url": _s("supabase_url", "SUPABASE_URL"),
-        "key": _s("supabase_key", "SUPABASE_KEY"),
-    }
+    """جلب إعدادات Supabase"""
+    import streamlit as st
+    try:
+        url = st.session_state.get("supabase_url") or st.secrets.get("SUPABASE_URL", "")
+        key = st.session_state.get("supabase_key") or st.secrets.get("SUPABASE_KEY", "")
+    except Exception:
+        url = st.session_state.get("supabase_url", "")
+        key = st.session_state.get("supabase_key", "")
+    return url, key
 
-def save_perfume_to_supabase(info: dict, images: dict = None, video_url: str = None):
-    """حفظ بيانات العطر والمحتوى في Supabase"""
-    config = _get_supabase_config()
-    if not config["url"] or not config["key"]:
-        return {"success": False, "error": "إعدادات Supabase غير مكتملة"}
 
-    headers = {
-        "apikey": config["key"],
-        "Authorization": f"Bearer {config['key']}",
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal"
-    }
+def save_perfume_to_supabase(info: dict, images: dict, video_url: str = "") -> dict:
+    """حفظ بيانات العطر والصور في Supabase"""
+    supabase_url, supabase_key = _get_supabase_config()
+    if not supabase_url or not supabase_key:
+        return {"success": False, "error": "SUPABASE_URL أو SUPABASE_KEY مفقود"}
 
     payload = {
-        "created_at": datetime.now().isoformat(),
-        "brand": info.get("brand"),
-        "product_name": info.get("product_name"),
-        "type": info.get("type"),
-        "gender": info.get("gender"),
-        "style": info.get("style"),
-        "mood": info.get("mood"),
-        "notes": info.get("notes_guess"),
-        "image_1x1": images.get("post_1_1", {}).get("url") if images else None,
-        "image_9x16": images.get("story_9_16", {}).get("url") if images else None,
-        "image_16x9": images.get("wide_16_9", {}).get("url") if images else None,
-        "video_url": video_url,
-        "source": "Mahwous AI Studio v13"
+        "brand":        info.get("brand", ""),
+        "product_name": info.get("product_name", ""),
+        "type":         info.get("type", ""),
+        "gender":       info.get("gender", ""),
+        "style":        info.get("style", ""),
+        "mood":         info.get("mood", ""),
+        "notes":        info.get("notes_guess", ""),
+        "images":       json.dumps({k: v.get("url", "") for k, v in images.items() if v.get("url")}),
+        "video_url":    video_url,
+        "created_at":   time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
     try:
-        # ملاحظة: يجب أن يكون الجدول 'perfumes' موجوداً في Supabase
-        r = requests.post(f"{config['url']}/rest/v1/perfumes", headers=headers, json=payload, timeout=20)
-        r.raise_for_status()
-        return {"success": True}
+        resp = requests.post(
+            f"{supabase_url}/rest/v1/perfume_history",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            },
+            json=payload,
+            timeout=15
+        )
+        if resp.status_code in [200, 201]:
+            return {"success": True, "data": resp.json()}
+        return {"success": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def fetch_perfume_history(limit: int = 20) -> list:
-    """استرجاع سجل العطور المحفوظة من Supabase"""
-    config = _get_supabase_config()
-    if not config["url"] or not config["key"]:
-        return []
 
-    headers = {
-        "apikey": config["key"],
-        "Authorization": f"Bearer {config['key']}",
-        "Content-Type": "application/json",
-    }
+def fetch_perfume_history(limit: int = 15) -> list:
+    """استرجاع سجل العطور المحفوظة"""
+    supabase_url, supabase_key = _get_supabase_config()
+    if not supabase_url or not supabase_key:
+        return []
 
     try:
-        # استرجاع أحدث السجلات مرتبة حسب التاريخ
-        url = f"{config['url']}/rest/v1/perfumes?select=*&order=created_at.desc&limit={limit}"
-        r = requests.get(url, headers=headers, timeout=10)
-        r.raise_for_status()
-        return r.json()
+        resp = requests.get(
+            f"{supabase_url}/rest/v1/perfume_history?select=*&order=created_at.desc&limit={limit}",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}"
+            },
+            timeout=10
+        )
+        if resp.status_code == 200:
+            return resp.json()
     except Exception:
-        return []
+        pass
+    return []
