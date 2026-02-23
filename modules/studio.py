@@ -79,12 +79,9 @@ def build_ramadan_product_prompt(info: dict, aspect: str) -> str:
     )
 
 def generate_trend_insights(info: dict) -> dict:
-    """توليد تحليل ترندات للمنتج باستخدام Claude"""
-    import requests, json
-    secrets = _get_secrets()
-    api_key = secrets.get("openrouter")
-    if not api_key:
-        return {"error": "OPENROUTER_API_KEY مفقود — أضفه في الإعدادات"}
+    """توليد تحليل ترندات للمنتج — يستخدم Claude أو Gemini تلقائياً"""
+    import json
+    from modules.ai_engine import _call_claude, _parse_json_response
     brand = info.get("brand", "Unknown")
     product = info.get("product_name", "Unknown")
     mood = info.get("mood", "luxury")
@@ -117,30 +114,21 @@ def generate_trend_insights(info: dict) -> dict:
   "seasonal_angle": "زاوية موسمية مناسبة"
 }}"""
     try:
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": "anthropic/claude-3.5-sonnet", "messages": [{"role": "user", "content": prompt}], "max_tokens": 1500},
-            timeout=30
-        )
-        data = resp.json()
-        if "choices" not in data or not data["choices"]:
-            return {"error": f"استجابة OpenRouter غير متوقعة: {str(data)[:200]}"}
-        text = data["choices"][0]["message"]["content"].strip()
+        # _call_claude يتضمن fallback تلقائي إلى Gemini عند نقص رصيد OpenRouter
+        text = _call_claude(prompt, max_tokens=1500)
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
-        return json.loads(text)
+        return json.loads(text.strip())
     except Exception as e:
         return {"error": str(e)}
 
 def analyze_perfume_url(url: str) -> dict:
-    """استخراج معلومات العطر من رابط المنتج"""
-    import requests
+    """استخراج معلومات العطر من رابط المنتج — يستخدم Claude أو Gemini تلقائياً"""
+    import requests, json
     from bs4 import BeautifulSoup
-    secrets = _get_secrets()
-    api_key = secrets.get("openrouter")
+    from modules.ai_engine import _call_claude
     if not url or not url.startswith("http"):
         return {"success": False, "error": "رابط غير صالح"}
     try:
@@ -152,38 +140,39 @@ def analyze_perfume_url(url: str) -> dict:
         meta_desc = soup.find("meta", {"name": "description"})
         desc_text = meta_desc.get("content", "")[:300] if meta_desc else ""
         page_text = soup.get_text()[:1000]
-        if api_key:
-            import json
-            prompt = f"""من هذه الصفحة استخرج معلومات العطر بـ JSON:
+
+        prompt = f"""من هذه الصفحة استخرج معلومات العطر بـ JSON:
 العنوان: {title_text}
 الوصف: {desc_text}
 النص: {page_text[:500]}
 
-أعطني JSON بهذا الشكل:
+أعطني JSON فقط بهذا الشكل بدون أي نص إضافي:
 {{"brand": "العلامة التجارية", "product_name": "اسم العطر", "type": "EDP/EDT", "gender": "masculine/feminine/unisex", "style": "luxury", "mood": "المزاج", "notes_guess": "ملاحظات العطر", "bottle_shape": "شكل الزجاجة", "colors": ["gold"]}}"""
-            r = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": "anthropic/claude-3.5-sonnet", "messages": [{"role": "user", "content": prompt}], "max_tokens": 500},
-                timeout=20
-            )
-            rdata = r.json()
-            if "choices" not in rdata or not rdata["choices"]:
-                raise ValueError(f"استجابة OpenRouter غير متوقعة: {str(rdata)[:200]}")
-            text = rdata["choices"][0]["message"]["content"].strip()
-            if "```" in text:
-                text = text.split("```")[1].lstrip("json").strip()
-            result = json.loads(text)
-            result["success"] = True
-            return result
-        else:
+
+        # _call_claude يتضمن fallback تلقائي إلى Gemini عند نقص رصيد OpenRouter
+        text = _call_claude(prompt, max_tokens=500)
+        if "```" in text:
+            text = text.split("```")[1].lstrip("json").strip()
+        result = json.loads(text.strip())
+        result["success"] = True
+        return result
+    except Exception as e:
+        # فشل AI — إرجاع بيانات أساسية من عنوان الصفحة
+        try:
+            import requests as _r
+            from bs4 import BeautifulSoup as _BS
+            _resp = _r.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+            _soup = _BS(_resp.text, "html.parser")
+            _title = _soup.find("title")
+            _title_text = _title.get_text()[:200] if _title else url
             return {
-                "success": True, "brand": title_text.split("-")[0].strip() if "-" in title_text else title_text[:30],
-                "product_name": title_text, "type": "EDP", "gender": "unisex",
+                "success": True,
+                "brand": _title_text.split("-")[0].strip() if "-" in _title_text else _title_text[:30],
+                "product_name": _title_text, "type": "EDP", "gender": "unisex",
                 "style": "luxury", "mood": "فاخر", "notes_guess": "", "bottle_shape": "", "colors": ["gold"]
             }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        except Exception:
+            return {"success": False, "error": str(e)}
 
 def upscale_image_fal(image_bytes: bytes) -> dict:
     """رفع دقة الصورة باستخدام Fal.ai"""

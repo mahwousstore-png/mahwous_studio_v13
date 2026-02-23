@@ -467,35 +467,90 @@ def generate_image_remix_fal(prompt: str, image_bytes: bytes, strength: float = 
 # توليد النصوص (Claude 3.5 via OpenRouter)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _call_gemini_text(prompt: str, max_tokens: int = 2000) -> str:
+    """استدعاء Gemini مباشرةً كـ fallback للنصوص"""
+    secrets = _get_secrets()
+    gemini_key = secrets.get("gemini")
+    if not gemini_key:
+        raise ValueError("GEMINI_API_KEY مفقود — أضفه في إعدادات API")
+
+    models_to_try = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
+    last_error = None
+    for model in models_to_try:
+        try:
+            resp = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.8}
+                },
+                timeout=60
+            )
+            if resp.status_code == 429:
+                time.sleep(2)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if candidates:
+                return candidates[0]["content"]["parts"][0]["text"].strip()
+            raise ValueError(f"استجابة Gemini فارغة: {str(data)[:200]}")
+        except Exception as e:
+            last_error = e
+            time.sleep(1)
+    raise ValueError(f"فشل Gemini بعد {len(models_to_try)} محاولات: {last_error}")
+
+
 def _call_claude(prompt: str, max_tokens: int = 2000) -> str:
-    """استدعاء Claude 3.5 Sonnet عبر OpenRouter"""
+    """استدعاء Claude 3.5 Sonnet عبر OpenRouter مع fallback تلقائي إلى Gemini"""
     secrets = _get_secrets()
     api_key = secrets.get("openrouter")
-    if not api_key:
-        raise ValueError("OPENROUTER_API_KEY مفقود — أضفه في إعدادات API")
 
-    resp = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://mahwousstore.com",
-            "X-Title": "Mahwous AI Studio"
-        },
-        json={
-            "model": "anthropic/claude-3.5-sonnet",
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
-            "temperature": 0.8
-        },
-        timeout=60
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    # FIX: التحقق من وجود 'choices' قبل الوصول إليه
-    if "choices" not in data or not data["choices"]:
-        raise ValueError(f"استجابة OpenRouter غير متوقعة: {json.dumps(data)[:200]}")
-    return data["choices"][0]["message"]["content"].strip()
+    # إذا لم يكن هناك مفتاح OpenRouter، انتقل مباشرةً إلى Gemini
+    if not api_key:
+        return _call_gemini_text(prompt, max_tokens)
+
+    try:
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://mahwousstore.com",
+                "X-Title": "Mahwous AI Studio"
+            },
+            json={
+                "model": "anthropic/claude-3.5-sonnet",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+                "temperature": 0.8
+            },
+            timeout=60
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        # FIX: التحقق من وجود 'choices' قبل الوصول إليه
+        if "choices" not in data or not data["choices"]:
+            # رسالة الخطأ تحتوي على 'credits' أو 'Insufficient' → fallback إلى Gemini
+            err_msg = str(data.get("error", {}).get("message", ""))
+            if any(kw in err_msg.lower() for kw in ["credit", "insufficient", "balance", "quota"]):
+                return _call_gemini_text(prompt, max_tokens)
+            raise ValueError(f"استجابة OpenRouter غير متوقعة: {json.dumps(data)[:200]}")
+        return data["choices"][0]["message"]["content"].strip()
+
+    except requests.exceptions.HTTPError as http_err:
+        # 402 Payment Required أو 429 Rate Limit → fallback إلى Gemini
+        status = http_err.response.status_code if http_err.response is not None else 0
+        if status in [402, 429, 403]:
+            return _call_gemini_text(prompt, max_tokens)
+        raise
+    except ValueError as ve:
+        # إذا كانت رسالة الخطأ تشير إلى نقص الرصيد → fallback
+        if any(kw in str(ve).lower() for kw in ["credit", "insufficient", "balance", "quota"]):
+            return _call_gemini_text(prompt, max_tokens)
+        raise
 
 
 def _parse_json_response(text: str) -> dict:
