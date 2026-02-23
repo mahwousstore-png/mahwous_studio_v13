@@ -166,7 +166,8 @@ def analyze_perfume_image(image_bytes: bytes) -> dict:
     models_to_try = [
         "gemini-2.0-flash-lite",
         "gemini-2.0-flash",
-        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-flash-latest",
     ]
 
     last_error = None
@@ -176,6 +177,9 @@ def analyze_perfume_image(image_bytes: bytes) -> dict:
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
                 json=payload, timeout=30
             )
+            if resp.status_code == 404:
+                last_error = f"404 النموذج {model} غير متاح"
+                continue
             if resp.status_code == 429:
                 last_error = f"429 Rate Limit on {model}"
                 time.sleep(2)
@@ -186,7 +190,7 @@ def analyze_perfume_image(image_bytes: bytes) -> dict:
                 text = text.split("```")[1].lstrip("json").strip()
             return json.loads(text)
         except requests.exceptions.HTTPError as e:
-            if resp.status_code == 429:
+            if e.response is not None and e.response.status_code in [404, 429]:
                 last_error = str(e)
                 time.sleep(2)
                 continue
@@ -254,16 +258,16 @@ def _build_image_prompt(info: dict, platform_key: str, outfit: str, scene: str,
 
 
 def generate_image_gemini(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
-    """توليد صورة بـ Imagen 3 عبر Gemini API"""
+    """توليد صورة بـ Imagen 3 أو Gemini 2.0 Flash (يولّد صوراً مجاناً)"""
     secrets = _get_secrets()
     api_key = secrets.get("gemini")
     if not api_key:
         raise ValueError("GEMINI_API_KEY مفقود")
 
+    # ─── المحاولة الأولى: Imagen 3 (يتطلب تفعيل الفوترة في Google Cloud) ───
     aspect_map = {"1:1": "1:1", "9:16": "9:16", "16:9": "16:9", "2:3": "2:3"}
     ar = aspect_map.get(aspect, "1:1")
-
-    payload = {
+    payload_imagen = {
         "instances": [{"prompt": prompt}],
         "parameters": {
             "sampleCount": 1,
@@ -272,44 +276,104 @@ def generate_image_gemini(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
             "personGeneration": "allow_all"
         }
     }
+    try:
+        resp = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={api_key}",
+            json=payload_imagen,
+            timeout=60
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            predictions = data.get("predictions", [])
+            if predictions:
+                b64_img = predictions[0].get("bytesBase64Encoded") or predictions[0].get("imageBytes", "")
+                if b64_img:
+                    return base64.b64decode(b64_img)
+        # 403 = فوترة غير مفعّلة — ننتقل للبديل المجاني
+        if resp.status_code in [403, 400]:
+            pass  # سنجرب Gemini Flash أدناه
+        else:
+            raise ValueError(f"Imagen API error {resp.status_code}: {resp.text[:200]}")
+    except ValueError:
+        raise
+    except Exception:
+        pass
 
-    # FIX: استخدام Gemini Imagen API المباشرة أولاً (بدلاً من Vertex AI الذي يتطلب OAuth2)
-    # Vertex AI endpoint يتطلب Bearer token من Google OAuth2 وليس API key مباشر
-    resp = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={api_key}",
-        json=payload,
-        timeout=60
+    # ─── المحاولة الثانية: Gemini 2.0 Flash مع توليد الصور (مجاني) ──────────
+    # gemini-2.0-flash-exp-image-generation يدعم توليد الصور مجاناً
+    try:
+        payload_flash = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseModalities": ["image", "text"],
+                "temperature": 1.0,
+            }
+        }
+        models_img = [
+            "gemini-2.0-flash-exp-image-generation",
+            "gemini-2.0-flash-preview-image-generation",
+        ]
+        for model in models_img:
+            r2 = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+                json=payload_flash,
+                timeout=90
+            )
+            if r2.status_code == 200:
+                parts = r2.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                for part in parts:
+                    inline = part.get("inlineData", {})
+                    if inline.get("mimeType", "").startswith("image"):
+                        return base64.b64decode(inline["data"])
+    except Exception:
+        pass
+
+    raise ValueError(
+        "Imagen 3 يتطلب تفعيل الفوترة في Google Cloud Console. "
+        "الحل: فعّل FAL_API_KEY في الإعدادات — هو أسهل وأرخص."
     )
-
-    if resp.status_code == 200:
-        data = resp.json()
-    else:
-        raise ValueError(f"Imagen API error {resp.status_code}: {resp.text[:300]}")
-
-    predictions = data.get("predictions", [])
-    if not predictions:
-        raise ValueError("لم يتم إرجاع صور من Imagen 3")
-
-    b64_img = predictions[0].get("bytesBase64Encoded") or predictions[0].get("imageBytes", "")
-    if not b64_img:
-        raise ValueError("لم يتم إرجاع بيانات الصورة")
-
-    return base64.b64decode(b64_img)
 
 
 def smart_generate_image(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
-    """توليد صورة ذكي: يجرب Fal.ai أولاً ثم Gemini Imagen"""
-    # FIX: Fal.ai أكثر موثوقية للصور — نبدأ به
+    """توليد صورة ذكي: يجرب Fal.ai أولاً ثم Gemini Imagen — مع رسائل خطأ واضحة"""
+    errors = []
+
+    # 1) جرّب Fal.ai أولاً (الأكثر موثوقية)
     try:
         return _generate_image_fal_flux(prompt, aspect)
-    except Exception:
-        pass
-    # Fallback إلى Gemini Imagen
+    except ValueError as e:
+        err = str(e)
+        if "FAL_API_KEY مفقود" not in err:
+            errors.append(f"Fal.ai: {err}")
+    except Exception as e:
+        errors.append(f"Fal.ai: {str(e)[:120]}")
+
+    # 2) جرّب Gemini Imagen 3
     try:
         return generate_image_gemini(prompt, aspect)
-    except Exception:
-        pass
-    raise ValueError("فشل توليد الصورة من جميع المزودين")
+    except ValueError as e:
+        err = str(e)
+        # Imagen 3 يتطلب تفعيل الفوترة في Google Cloud
+        if "403" in err or "PERMISSION_DENIED" in err or "billing" in err.lower():
+            errors.append("Imagen 3: يتطلب تفعيل الفوترة في Google Cloud Console — فعّل Billing أو استخدم FAL_API_KEY بدلاً منه")
+        elif "400" in err or "INVALID" in err.upper():
+            errors.append("Imagen 3: معامل خاطئ — " + err[:100])
+        elif "GEMINI_API_KEY مفقود" not in err:
+            errors.append(f"Imagen 3: {err[:120]}")
+    except Exception as e:
+        errors.append(f"Imagen 3: {str(e)[:120]}")
+
+    # رسالة الخطأ النهائية
+    if errors:
+        combined = " | ".join(errors)
+        raise ValueError(f"فشل توليد الصورة: {combined}")
+
+    # لا يوجد أي مفتاح
+    raise ValueError(
+        "فشل توليد الصورة — تأكد من إضافة FAL_API_KEY أو GEMINI_API_KEY في الإعدادات.\n"
+        "• Fal.ai (الأسهل): سجّل على fal.ai واحصل على مفتاح مجاني\n"
+        "• Gemini Imagen 3: يتطلب تفعيل الفوترة في Google Cloud"
+    )
 
 
 def _generate_image_fal_flux(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
@@ -473,7 +537,13 @@ def _call_gemini_text(prompt: str, max_tokens: int = 2000) -> str:
     if not gemini_key:
         raise ValueError("GEMINI_API_KEY مفقود — أضفه في إعدادات API")
 
-    models_to_try = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
+    # الأولوية: 2.0 Flash Lite (مجاني وسريع) ← 2.0 Flash ← 1.5 Flash 8B (أصغر وأسرع)
+    models_to_try = [
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-flash-latest",
+    ]
     last_error = None
     for model in models_to_try:
         try:
@@ -486,8 +556,12 @@ def _call_gemini_text(prompt: str, max_tokens: int = 2000) -> str:
                 },
                 timeout=60
             )
+            if resp.status_code == 404:
+                # النموذج غير موجود — جرّب التالي
+                last_error = f"404 النموذج {model} غير متاح"
+                continue
             if resp.status_code == 429:
-                time.sleep(2)
+                time.sleep(3)
                 continue
             resp.raise_for_status()
             data = resp.json()
@@ -495,6 +569,12 @@ def _call_gemini_text(prompt: str, max_tokens: int = 2000) -> str:
             if candidates:
                 return candidates[0]["content"]["parts"][0]["text"].strip()
             raise ValueError(f"استجابة Gemini فارغة: {str(data)[:200]}")
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                last_error = f"404 النموذج {model} غير متاح"
+                continue
+            last_error = e
+            time.sleep(1)
         except Exception as e:
             last_error = e
             time.sleep(1)
@@ -804,7 +884,25 @@ def generate_video_luma(prompt: str, image_bytes: Optional[bytes] = None,
         if resp.status_code in [200, 201]:
             data = resp.json()
             return {"id": data.get("id", ""), "state": data.get("state", "pending"), "provider": "luma"}
-        return {"error": f"Luma API error {resp.status_code}: {resp.text[:200]}"}
+
+        # رسائل خطأ واضحة بحسب كود الاستجابة
+        try:
+            err_json = resp.json()
+            err_detail = err_json.get("detail", "") or err_json.get("message", "") or resp.text[:200]
+        except Exception:
+            err_detail = resp.text[:200]
+
+        if resp.status_code == 400 and "credit" in err_detail.lower():
+            return {"error": (
+                "⚠️ رصيد Luma منتهي — اشحن رصيدك على lumalabs.ai\n"
+                "أو استخدم RunwayML أو Fal.ai كبديل مجاني أو أرخص."
+            )}
+        if resp.status_code == 401:
+            return {"error": "❌ مفتاح Luma غير صحيح — تحقق منه في الإعدادات"}
+        if resp.status_code == 429:
+            return {"error": "⏳ تجاوزت حد الطلبات في Luma — انتظر دقيقة وأعد المحاولة"}
+
+        return {"error": f"Luma API error {resp.status_code}: {err_detail}"}
     except Exception as e:
         return {"error": str(e)}
 
