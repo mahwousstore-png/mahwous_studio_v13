@@ -521,13 +521,13 @@ def _show_video_generation_tab(perfume_info: dict):
         video_provider = st.selectbox(
             "🎬 منصة التوليد",
             options=provider_options,
-            format_func=lambda x: {"luma": "Luma Dream Machine", "runway": "RunwayML Gen-3", "fal": "Fal.ai (Kling/Veo/SVD)"}.get(x, x),
+            format_func=lambda x: {"kling": "⭐ Kling 2.1 (Fal.ai) — الأفضل", "hailuo": "🎭 Hailuo (Fal.ai) — درامي", "seedance": "🌱 Seedance (Fal.ai)", "luma": "🌙 Luma Ray-2", "runway": "🎥 RunwayML Gen-4", "fal": "⚡ Fal.ai Auto"}.get(x, x),
             key="video_provider"
         )
     with vc2:
         video_duration = st.select_slider(
             "⏱️ مدة الفيديو",
-            options=[5, 7, 10, 15],
+            options=[5, 9, 10],  # Luma: 5s or 9s; Kling: 5s or 10s
             value=7,
             key="video_duration"
         )
@@ -630,7 +630,7 @@ def _show_video_generation_tab(perfume_info: dict):
     st.markdown("---")
 
     # ── زر التوليد ──
-    provider_label = {"luma": "Luma Dream Machine", "runway": "RunwayML Gen-3", "fal": "Fal.ai"}.get(video_provider, video_provider)
+    provider_label = {"kling":"Kling 2.1","hailuo":"Hailuo","seedance":"Seedance","luma":"Luma Ray-2","runway":"RunwayML Gen-4","fal":"Fal.ai"}.get(video_provider, video_provider)
     gen_col1, gen_col2 = st.columns([2, 1])
     with gen_col1:
         generate_video_btn = st.button(
@@ -667,10 +667,10 @@ def _show_video_generation_tab(perfume_info: dict):
                     aspect_ratio=video_aspect,
                     duration=video_duration,
                 )
-            else:  # fal
+            else:  # kling / hailuo / seedance / fal
                 result = generate_video_fal(
                     prompt=video_prompt,
-                    model=fal_video_model,
+                    model=video_provider,  # kling, hailuo, seedance
                     aspect_ratio=video_aspect,
                     image_bytes=ref_bytes,
                 )
@@ -695,6 +695,7 @@ def _show_video_generation_tab(perfume_info: dict):
             gen_id = result.get("id", "")
             st.session_state["video_gen_id"] = gen_id
             st.session_state["video_gen_provider"] = video_provider
+            st.session_state["video_gen_model_id"] = result.get("model_id","")
             st.markdown(f"""
             <div class='video-status-pending'>
               ⏳ تم إرسال الطلب بنجاح! معرّف التوليد: <code>{gen_id}</code><br>

@@ -38,9 +38,13 @@ MAHWOUS_OUTFITS = {
 }
 
 FAL_VIDEO_MODELS = {
-    "kling":  "fal-ai/kling-video/v1.6/standard/image-to-video",
-    "veo":    "fal-ai/veo2",
-    "svd":    "fal-ai/stable-video",
+    "kling":      "fal-ai/kling-video/v2.1/standard/text-to-video",
+    "kling_img":  "fal-ai/kling-video/v2.1/standard/image-to-video",
+    "hailuo":     "fal-ai/minimax-video",
+    "hailuo_img": "fal-ai/minimax-video/image-to-video",
+    "seedance":   "fal-ai/seedance-v1-lite",
+    "veo":        "fal-ai/veo2",
+    "svd":        "fal-ai/stable-video",
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1039,39 +1043,89 @@ def check_runway_status(generation_id: str) -> dict:
 def generate_video_fal(prompt: str, model: str = "kling",
                         aspect_ratio: str = "9:16",
                         image_bytes: Optional[bytes] = None) -> dict:
-    """توليد فيديو بـ Fal.ai"""
+    """توليد فيديو بـ Fal.ai — Kling 2.1 / Hailuo / Seedance"""
     secrets = _get_secrets()
     api_key = secrets.get("fal")
     if not api_key:
         return {"error": "FAL_API_KEY مفقود — أضفه في إعدادات API"}
 
-    os.environ["FAL_KEY"] = api_key
-    model_id = FAL_VIDEO_MODELS.get(model, FAL_VIDEO_MODELS["kling"])
+    # اختيار النموذج الصحيح بناءً على وجود صورة مرجعية
+    if image_bytes:
+        model_id = FAL_VIDEO_MODELS.get(model + "_img", FAL_VIDEO_MODELS.get(model, "fal-ai/kling-video/v2.1/standard/image-to-video"))
+    else:
+        model_id = FAL_VIDEO_MODELS.get(model, "fal-ai/kling-video/v2.1/standard/text-to-video")
+
+    payload: dict = {
+        "prompt": prompt,
+        "aspect_ratio": aspect_ratio,
+        "duration": "5",
+        "negative_prompt": "blurry, low quality, text, watermark, distorted"
+    }
+    if image_bytes:
+        b64 = base64.b64encode(image_bytes).decode()
+        payload["image_url"] = f"data:image/jpeg;base64,{b64}"
 
     try:
-        import fal_client
-
-        args: dict = {"prompt": prompt, "aspect_ratio": aspect_ratio}
-        if image_bytes:
-            b64 = base64.b64encode(image_bytes).decode()
-            args["image_url"] = f"data:image/jpeg;base64,{b64}"
-
-        result = fal_client.run(model_id, arguments=args)
+        resp = requests.post(
+            f"https://fal.run/{model_id}",
+            headers={
+                "Authorization": f"Key {api_key}",
+                "Content-Type": "application/json"
+            },
+            json=payload,
+            timeout=300
+        )
+        resp.raise_for_status()
+        result = resp.json()
         video_url = (
             result.get("video", {}).get("url") or
             result.get("video_url") or
             result.get("url", "")
         )
         if video_url:
-            return {"state": "completed", "video_url": video_url, "id": "fal_sync"}
-        return {"state": "error", "error": "لم يتم إرجاع فيديو"}
+            return {"state": "completed", "video_url": video_url, "id": "fal_sync", "provider": "fal"}
+        # async mode
+        request_id = result.get("request_id", "")
+        if request_id:
+            return {"state": "pending", "id": request_id, "provider": "fal", "model_id": model_id}
+        return {"state": "error", "error": f"لم يتم إرجاع فيديو: {str(result)[:150]}"}
+    except requests.exceptions.Timeout:
+        return {"error": "انتهت مهلة Fal.ai — حاول مجدداً"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e)[:200]}
 
 
-def check_fal_video_status(generation_id: str) -> dict:
-    """فحص حالة توليد Fal (للتوافق — عادةً فوري)"""
-    return {"state": "completed", "video_url": generation_id}
+def check_fal_video_status(generation_id: str, model_id: str = "") -> dict:
+    """فحص حالة توليد Fal.ai غير المتزامن"""
+    secrets = _get_secrets()
+    api_key = secrets.get("fal")
+    if not api_key or not generation_id:
+        return {"state": "error", "error": "بيانات مفقودة"}
+    if not model_id:
+        return {"state": "completed", "video_url": generation_id}
+    try:
+        sr = requests.get(
+            f"https://queue.fal.run/{model_id}/requests/{generation_id}/status",
+            headers={"Authorization": f"Key {api_key}"}, timeout=15
+        )
+        if sr.status_code != 200:
+            return {"state": "error", "error": f"HTTP {sr.status_code}"}
+        sdata = sr.json()
+        status = sdata.get("status", "IN_QUEUE")
+        if status == "COMPLETED":
+            rr = requests.get(
+                f"https://queue.fal.run/{model_id}/requests/{generation_id}",
+                headers={"Authorization": f"Key {api_key}"}, timeout=15
+            )
+            result = rr.json()
+            video_url = result.get("video", {}).get("url") or result.get("url", "")
+            return {"state": "completed", "video_url": video_url}
+        elif status in ["FAILED", "CANCELLED"]:
+            return {"state": "failed", "error": sdata.get("error", {}).get("message", "فشل الطلب")}
+        pos = sdata.get("queue_position", "?")
+        return {"state": "processing", "progress": 0, "queue_position": pos}
+    except Exception as e:
+        return {"state": "error", "error": str(e)[:200]}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
