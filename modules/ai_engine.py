@@ -161,15 +161,41 @@ def analyze_perfume_image(image_bytes: bytes) -> dict:
         "generationConfig": {"temperature": 0.1, "maxOutputTokens": 800}
     }
 
-    resp = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
-        json=payload, timeout=30
-    )
-    resp.raise_for_status()
-    text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    if "```" in text:
-        text = text.split("```")[1].lstrip("json").strip()
-    return json.loads(text)
+    # FIX: استخدام gemini-2.0-flash-lite بدلاً من gemini-2.0-flash لتجنب 429
+    # مع retry logic للتعامل مع rate limits
+    models_to_try = [
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+    ]
+
+    last_error = None
+    for model in models_to_try:
+        try:
+            resp = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+                json=payload, timeout=30
+            )
+            if resp.status_code == 429:
+                last_error = f"429 Rate Limit on {model}"
+                time.sleep(2)
+                continue
+            resp.raise_for_status()
+            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if "```" in text:
+                text = text.split("```")[1].lstrip("json").strip()
+            return json.loads(text)
+        except requests.exceptions.HTTPError as e:
+            if resp.status_code == 429:
+                last_error = str(e)
+                time.sleep(2)
+                continue
+            raise
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    raise ValueError(f"فشل تحليل الصورة بجميع النماذج: {last_error}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -247,29 +273,18 @@ def generate_image_gemini(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
         }
     }
 
+    # FIX: استخدام Gemini Imagen API المباشرة أولاً (بدلاً من Vertex AI الذي يتطلب OAuth2)
+    # Vertex AI endpoint يتطلب Bearer token من Google OAuth2 وليس API key مباشر
     resp = requests.post(
-        f"https://us-central1-aiplatform.googleapis.com/v1/projects/gen-lang-client-0296933597/locations/us-central1/publishers/google/models/imagegeneration@006:predict",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        },
+        f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={api_key}",
         json=payload,
         timeout=60
     )
 
-    # Fallback: استخدم Gemini Imagen API المباشرة
-    if resp.status_code != 200:
-        resp2 = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={api_key}",
-            json=payload,
-            timeout=60
-        )
-        if resp2.status_code == 200:
-            data = resp2.json()
-        else:
-            raise ValueError(f"Imagen API error {resp2.status_code}: {resp2.text[:300]}")
-    else:
+    if resp.status_code == 200:
         data = resp.json()
+    else:
+        raise ValueError(f"Imagen API error {resp.status_code}: {resp.text[:300]}")
 
     predictions = data.get("predictions", [])
     if not predictions:
@@ -283,13 +298,18 @@ def generate_image_gemini(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
 
 
 def smart_generate_image(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
-    """توليد صورة ذكي: يجرب Gemini أولاً ثم Fal.ai"""
+    """توليد صورة ذكي: يجرب Fal.ai أولاً ثم Gemini Imagen"""
+    # FIX: Fal.ai أكثر موثوقية للصور — نبدأ به
+    try:
+        return _generate_image_fal_flux(prompt, aspect)
+    except Exception:
+        pass
+    # Fallback إلى Gemini Imagen
     try:
         return generate_image_gemini(prompt, aspect)
     except Exception:
         pass
-    # Fallback إلى Fal.ai
-    return _generate_image_fal_flux(prompt, aspect)
+    raise ValueError("فشل توليد الصورة من جميع المزودين")
 
 
 def _generate_image_fal_flux(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
@@ -301,18 +321,44 @@ def _generate_image_fal_flux(prompt: str, aspect: str = "1:1") -> Optional[bytes
 
     os.environ["FAL_KEY"] = api_key
 
-    aspect_map = {"1:1": "square", "9:16": "portrait_16_9", "16:9": "landscape_16_9", "2:3": "portrait_4_3"}
-    img_size = aspect_map.get(aspect, "square")
+    # FIX: تصحيح قيم image_size لتتوافق مع Fal.ai API
+    # القيم الصحيحة: square_hd, square, portrait_4_3, portrait_16_9, landscape_4_3, landscape_16_9
+    aspect_map = {
+        "1:1":  "square_hd",
+        "9:16": "portrait_16_9",
+        "16:9": "landscape_16_9",
+        "2:3":  "portrait_4_3",
+        "4:3":  "landscape_4_3",
+    }
+    img_size = aspect_map.get(aspect, "square_hd")
 
+    # FIX: endpoint صحيح لـ Fal.ai Flux Dev
     resp = requests.post(
         "https://fal.run/fal-ai/flux/dev",
-        headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
-        json={"prompt": prompt, "image_size": img_size, "num_inference_steps": 28, "num_images": 1},
+        headers={
+            "Authorization": f"Key {api_key}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "prompt": prompt,
+            "image_size": img_size,
+            "num_inference_steps": 28,
+            "num_images": 1,
+            "enable_safety_checker": False,
+            "output_format": "jpeg"
+        },
         timeout=120
     )
     resp.raise_for_status()
-    img_url = resp.json()["images"][0]["url"]
+    result = resp.json()
+    images = result.get("images", [])
+    if not images:
+        raise ValueError("لم يتم إرجاع صور من Fal.ai")
+    img_url = images[0].get("url", "")
+    if not img_url:
+        raise ValueError("رابط الصورة فارغ من Fal.ai")
     img_resp = requests.get(img_url, timeout=30)
+    img_resp.raise_for_status()
     return img_resp.content
 
 
@@ -387,21 +433,33 @@ def generate_image_remix_fal(prompt: str, image_bytes: bytes, strength: float = 
     b64 = base64.b64encode(image_bytes).decode()
     data_uri = f"data:image/jpeg;base64,{b64}"
 
+    # FIX: endpoint صحيح لـ image-to-image في Fal.ai
     resp = requests.post(
         "https://fal.run/fal-ai/flux/dev/image-to-image",
-        headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Key {api_key}",
+            "Content-Type": "application/json"
+        },
         json={
             "prompt": prompt,
             "image_url": data_uri,
             "strength": strength,
             "num_inference_steps": 28,
-            "num_images": 1
+            "num_images": 1,
+            "output_format": "jpeg"
         },
         timeout=120
     )
     resp.raise_for_status()
-    img_url = resp.json()["images"][0]["url"]
+    result = resp.json()
+    images = result.get("images", [])
+    if not images:
+        raise ValueError("لم يتم إرجاع صور من Fal.ai image-to-image")
+    img_url = images[0].get("url", "")
+    if not img_url:
+        raise ValueError("رابط الصورة فارغ")
     img_resp = requests.get(img_url, timeout=30)
+    img_resp.raise_for_status()
     return img_resp.content
 
 
@@ -433,7 +491,11 @@ def _call_claude(prompt: str, max_tokens: int = 2000) -> str:
         timeout=60
     )
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip()
+    data = resp.json()
+    # FIX: التحقق من وجود 'choices' قبل الوصول إليه
+    if "choices" not in data or not data["choices"]:
+        raise ValueError(f"استجابة OpenRouter غير متوقعة: {json.dumps(data)[:200]}")
+    return data["choices"][0]["message"]["content"].strip()
 
 
 def _parse_json_response(text: str) -> dict:
@@ -656,11 +718,17 @@ def generate_video_luma(prompt: str, image_bytes: Optional[bytes] = None,
     if not api_key:
         return {"error": "LUMA_API_KEY مفقود — أضفه في إعدادات API"}
 
+    # FIX: إضافة model parameter المطلوب (ray-2 هو النموذج الحالي)
     payload: dict = {
         "prompt": prompt,
+        "model": "ray-2",
         "aspect_ratio": aspect_ratio,
-        "loop": loop
+        "loop": loop,
     }
+
+    # FIX: إضافة resolution إذا كان duration محدداً
+    if duration and duration > 0:
+        payload["duration"] = f"{duration}s"
 
     if image_bytes:
         img_url = _img_to_url_imgbb(image_bytes)
@@ -670,7 +738,11 @@ def generate_video_luma(prompt: str, image_bytes: Optional[bytes] = None,
     try:
         resp = requests.post(
             "https://api.lumalabs.ai/dream-machine/v1/generations",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
             json=payload,
             timeout=30
         )
@@ -691,7 +763,10 @@ def check_luma_status(generation_id: str) -> dict:
     try:
         resp = requests.get(
             f"https://api.lumalabs.ai/dream-machine/v1/generations/{generation_id}",
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json"
+            },
             timeout=15
         )
         if resp.status_code == 200:
@@ -721,23 +796,31 @@ def poll_luma_video(generation_id: str, timeout: int = 300) -> dict:
 
 def generate_video_runway(prompt: str, image_bytes: Optional[bytes] = None,
                            aspect_ratio: str = "9:16", duration: int = 5) -> dict:
-    """توليد فيديو بـ RunwayML Gen-3 Alpha Turbo"""
+    """توليد فيديو بـ RunwayML Gen-4 Turbo"""
     secrets = _get_secrets()
     api_key = secrets.get("runway")
     if not api_key:
         return {"error": "RUNWAY_API_KEY مفقود — أضفه في إعدادات API"}
 
-    ratio_map = {"9:16": "720:1280", "16:9": "1280:720", "1:1": "768:768"}
-    resolution = ratio_map.get(aspect_ratio, "720:1280")
+    # FIX: تصحيح ratio map وفق API version 2024-11-06
+    # القيم الصحيحة: "1280:720", "720:1280", "1104:832", "960:960", "832:1104", "1584:672"
+    ratio_map = {
+        "9:16": "720:1280",
+        "16:9": "1280:720",
+        "1:1":  "960:960",
+    }
+    ratio = ratio_map.get(aspect_ratio, "720:1280")
 
+    # FIX: تصحيح payload structure وفق API الحالي
+    # model الصحيح: "gen4_turbo" (وليس "gen3a_turbo" الذي لا يزال مدعوماً لكن gen4_turbo أفضل)
     payload: dict = {
+        "model": "gen4_turbo",
         "promptText": prompt,
-        "model": "gen3a_turbo",
-        "duration": min(duration, 10),
-        "resolution": resolution,
-        "ratio": aspect_ratio,
+        "ratio": ratio,
+        "duration": min(max(duration, 2), 10),  # يجب أن يكون بين 2 و 10
     }
 
+    # FIX: promptImage يجب أن يكون data URI أو HTTPS URL
     if image_bytes:
         b64 = base64.b64encode(image_bytes).decode()
         payload["promptImage"] = f"data:image/jpeg;base64,{b64}"
@@ -770,7 +853,10 @@ def check_runway_status(generation_id: str) -> dict:
     try:
         resp = requests.get(
             f"https://api.dev.runwayml.com/v1/tasks/{generation_id}",
-            headers={"Authorization": f"Bearer {api_key}", "X-Runway-Version": "2024-11-06"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "X-Runway-Version": "2024-11-06"
+            },
             timeout=15
         )
         if resp.status_code == 200:

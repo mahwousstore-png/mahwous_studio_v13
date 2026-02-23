@@ -123,7 +123,10 @@ def generate_trend_insights(info: dict) -> dict:
             json={"model": "anthropic/claude-3.5-sonnet", "messages": [{"role": "user", "content": prompt}], "max_tokens": 1500},
             timeout=30
         )
-        text = resp.json()["choices"][0]["message"]["content"].strip()
+        data = resp.json()
+        if "choices" not in data or not data["choices"]:
+            return {"error": f"استجابة OpenRouter غير متوقعة: {str(data)[:200]}"}
+        text = data["choices"][0]["message"]["content"].strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -164,7 +167,10 @@ def analyze_perfume_url(url: str) -> dict:
                 json={"model": "anthropic/claude-3.5-sonnet", "messages": [{"role": "user", "content": prompt}], "max_tokens": 500},
                 timeout=20
             )
-            text = r.json()["choices"][0]["message"]["content"].strip()
+            rdata = r.json()
+            if "choices" not in rdata or not rdata["choices"]:
+                raise ValueError(f"استجابة OpenRouter غير متوقعة: {str(rdata)[:200]}")
+            text = rdata["choices"][0]["message"]["content"].strip()
             if "```" in text:
                 text = text.split("```")[1].lstrip("json").strip()
             result = json.loads(text)
@@ -1775,7 +1781,7 @@ def show_studio_page():
                 with st.spinner("🎙️ جاري توليد التعليق الصوتي..."):
                     try:
                         audio_bytes = generate_voiceover_elevenlabs(
-                            st.session_state.get("voiceover_text", ""),
+                            voiceover_text,
                             voice_id=st.session_state.get("voice_id", "default"),
                             api_key=st.session_state.get("elevenlabs_key", "")
                         )
