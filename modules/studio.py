@@ -1,6 +1,6 @@
 """
-🎬 استديو مهووس الذكي v13.0
-واجهة رئيسية محسّنة — توليد الصور والفيديوهات مباشرة من التطبيق
+🎬 استديو مهووس الذكي v13.5
+واجهة رئيسية محسّنة — تدعم سحب البيانات من الروابط + رفع الصور + الإدخال اليدوي
 """
 
 import streamlit as st
@@ -8,7 +8,9 @@ import base64
 import json
 import io
 import zipfile
-import concurrent.futures  # تحسين: للمعالجة المتوازية
+import concurrent.futures
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime
 from PIL import Image
 import time
@@ -170,7 +172,6 @@ def _pil_resize(img_bytes: bytes, target_w: int, target_h: int) -> bytes:
         img = img.convert("RGB")
         img = img.resize((target_w, target_h), Image.LANCZOS)
         buf = io.BytesIO()
-        # تحسين: optimize=False يسرع العملية بشكل كبير
         img.save(buf, format="JPEG", quality=95, optimize=False)
         return buf.getvalue()
     except:
@@ -180,7 +181,6 @@ def _pil_resize(img_bytes: bytes, target_w: int, target_h: int) -> bytes:
 def _create_zip(images: dict, info: dict) -> bytes:
     buf = io.BytesIO()
     
-    # دالة مساعدة للمعالجة المتوازية
     def process_image_for_zip(item):
         key, data = item
         if data.get("bytes"):
@@ -190,7 +190,6 @@ def _create_zip(images: dict, info: dict) -> bytes:
         return None
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # استخدام ThreadPoolExecutor لتسريع العملية
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = [executor.submit(process_image_for_zip, (k, v)) for k, v in images.items()]
             for future in concurrent.futures.as_completed(futures):
@@ -213,8 +212,48 @@ def _create_zip(images: dict, info: dict) -> bytes:
 
 @st.cache_data
 def get_cached_asset_bytes(path: str) -> bytes:
-    """تحميل الأصول مع التخزين المؤقت لتحسين الأداء"""
     return load_asset_bytes(path)
+
+
+def _fetch_product_from_url(url: str):
+    """سحب بيانات المنتج والصورة من الرابط"""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # 1. محاولة العثور على الصورة الرئيسية (OpenGraph Image)
+        image_bytes = None
+        og_image = soup.find("meta", property="og:image")
+        if og_image and og_image.get("content"):
+            img_url = og_image["content"]
+            if not img_url.startswith("http"):
+                from urllib.parse import urljoin
+                img_url = urljoin(url, img_url)
+                
+            img_resp = requests.get(img_url, headers=headers, timeout=10)
+            if img_resp.status_code == 200:
+                image_bytes = img_resp.content
+
+        # 2. سحب النصوص الأساسية
+        og_title = soup.find("meta", property="og:title")
+        title = og_title["content"] if og_title else soup.title.string if soup.title else ""
+        
+        og_desc = soup.find("meta", property="og:description")
+        description = og_desc["content"] if og_desc else ""
+        
+        return {
+            "image_bytes": image_bytes,
+            "raw_title": title.strip(),
+            "raw_desc": description.strip(),
+            "url": url
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def _info_card(info: dict):
@@ -299,11 +338,10 @@ def _show_how_it_works():
          border-radius:0.75rem; padding:1.2rem; margin-top:1rem;'>
       <div style='color:#F5D060; font-size:0.95rem; font-weight:900; margin-bottom:0.8rem;'>🚀 كيف يعمل الاستديو؟</div>
       <div style='color:#D0B070; font-size:0.85rem; line-height:2;'>
-        1️⃣ ارفع صورة العطر أو أدخل البيانات يدوياً<br>
+        1️⃣ اختر طريقة الإدخال (صورة، رابط، أو يدوي)<br>
         2️⃣ اختر المنصات المطلوبة<br>
         3️⃣ انقر "توليد الصور" لإنشاء محتوى جاهز لكل منصة<br>
-        4️⃣ استخدم تبويب الفيديو لتوليد فيديو سينمائي مباشرة<br>
-        5️⃣ حمّل الصور والفيديوهات بصيغة ZIP
+        4️⃣ استخدم تبويب الفيديو لتوليد فيديو سينمائي مباشرة
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -346,23 +384,6 @@ def _show_video_generation_tab(perfume_info: dict):
 
     if not has_luma and not has_runway and not has_fal:
         st.warning("⚠️ أضف مفتاح Luma أو RunwayML أو FAL في الإعدادات لتفعيل توليد الفيديو")
-        with st.expander("📋 كيف أحصل على مفاتيح API الفيديو؟"):
-            st.markdown("""
-            <div style='color:#D0B070; font-size:0.88rem; line-height:2;'>
-            <strong style='color:#F5D060;'>Luma Dream Machine:</strong><br>
-            1. افتح <a href="https://lumalabs.ai" target="_blank" style="color:#C0A0FF;">lumalabs.ai</a><br>
-            2. سجّل حساباً → API → Create Key<br>
-            3. أضف المفتاح في الإعدادات كـ LUMA_API_KEY<br><br>
-            <strong style='color:#F5D060;'>RunwayML Gen-3:</strong><br>
-            1. افتح <a href="https://runwayml.com" target="_blank" style="color:#C0A0FF;">runwayml.com</a><br>
-            2. سجّل حساباً → API → Generate Token<br>
-            3. أضف المفتاح في الإعدادات كـ RUNWAY_API_KEY<br><br>
-            <strong style='color:#F5D060;'>Fal.ai (Kling/Veo/SVD):</strong><br>
-            1. افتح <a href="https://fal.ai" target="_blank" style="color:#C0A0FF;">fal.ai</a><br>
-            2. سجّل حساباً → API Keys → Create<br>
-            3. أضف المفتاح في الإعدادات كـ FAL_API_KEY
-            </div>
-            """, unsafe_allow_html=True)
         return
 
     st.markdown("---")
@@ -555,7 +576,6 @@ def _show_video_generation_tab(perfume_info: dict):
         if result.get("error"):
             st.markdown(f"<div class='video-status-error'>❌ {result['error']}</div>", unsafe_allow_html=True)
         elif result.get("state") == "completed" and result.get("video_url"):
-            # Fal.ai أو أي مزود أعاد الفيديو فوراً
             video_url = result["video_url"]
             st.markdown(f"""
             <div class='video-status-done'>
@@ -1048,7 +1068,7 @@ def show_studio_page():
     <div class="studio-hero">
       <h1>🎬 استديو مهووس الذكي</h1>
       <p class="sub">توليد صور · فيديو مباشر · تعليقات · سيناريوهات · هاشتاقات · لجميع المنصات</p>
-      <div class="version-badge">v13.0 · GEMINI 2.0 + CLAUDE 3.5 + IMAGEN 3 + LUMA + RUNWAY</div>
+      <div class="version-badge">v13.5 · GEMINI 2.0 + CLAUDE 3.5 + IMAGEN 3 + LUMA + RUNWAY</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1083,35 +1103,101 @@ def show_studio_page():
     if "input_mode" not in st.session_state:
         st.session_state.input_mode = "image"
 
-    mode_col1, mode_col2 = st.columns(2)
+    mode_col1, mode_col2, mode_col3 = st.columns(3)
+    
     with mode_col1:
         is_img = st.session_state.input_mode == "image"
-        if st.button(
-            f"📸  رفع صورة العطر\n{'← محدد' if is_img else 'انقر للاختيار'}",
-            use_container_width=True,
-            type="primary" if is_img else "secondary",
-            key="mode_image"
-        ):
+        if st.button(f"📸 رفع صورة\n{'← محدد' if is_img else ''}", use_container_width=True, type="primary" if is_img else "secondary", key="mode_image"):
             st.session_state.input_mode = "image"
             st.rerun()
+            
     with mode_col2:
+        is_link = st.session_state.input_mode == "link"
+        if st.button(f"🔗 رابط منتج\n{'← محدد' if is_link else ''}", use_container_width=True, type="primary" if is_link else "secondary", key="mode_link"):
+            st.session_state.input_mode = "link"
+            st.rerun()
+
+    with mode_col3:
         is_man = st.session_state.input_mode == "manual"
-        if st.button(
-            f"⌨️  إدخال البيانات يدوياً\n{'← محدد' if is_man else 'انقر للاختيار'}",
-            use_container_width=True,
-            type="primary" if is_man else "secondary",
-            key="mode_manual"
-        ):
+        if st.button(f"⌨️ يدوي\n{'← محدد' if is_man else ''}", use_container_width=True, type="primary" if is_man else "secondary", key="mode_manual"):
             st.session_state.input_mode = "manual"
             st.rerun()
 
     st.markdown("---")
 
-    # ─── Step 2: Input ───────────────────────────────────────────────────────
+    # ─── Step 2: Input Logic ─────────────────────────────────────────────────
     perfume_info = None
     image_bytes  = None
 
-    if st.session_state.input_mode == "image":
+    # ---------------------- وضع الرابط (الجديد) ----------------------
+    if st.session_state.input_mode == "link":
+        st.markdown('<div class="step-badge">② أدخل رابط المنتج</div>', unsafe_allow_html=True)
+        
+        url_input = st.text_input("🔗 رابط صفحة العطر (مثال: legabreil.com)", placeholder="https://...")
+        
+        if url_input:
+            if st.button("🔍 سحب البيانات وتحليلها", type="primary", key="fetch_url_btn"):
+                with st.spinner("جاري سحب البيانات من الموقع..."):
+                    scraped_data = _fetch_product_from_url(url_input)
+                
+                if "error" in scraped_data:
+                    st.error(f"❌ تعذّر سحب البيانات: {scraped_data['error']}")
+                else:
+                    # حفظ الصورة المسحوبة في الجلسة
+                    if scraped_data.get("image_bytes"):
+                        st.session_state["scraped_image"] = scraped_data["image_bytes"]
+                        st.session_state["scraped_meta"] = scraped_data
+                        st.success("✅ تم سحب الصورة والبيانات بنجاح!")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ تم سحب النصوص ولكن لم يتم العثور على صورة واضحة. يرجى رفع الصورة يدوياً.")
+                        st.session_state["scraped_meta"] = scraped_data
+
+        # عرض البيانات المسحوبة والتحليل
+        if "scraped_meta" in st.session_state:
+            meta = st.session_state["scraped_meta"]
+            image_bytes = st.session_state.get("scraped_image")
+            
+            col_preview, col_details = st.columns([1, 2])
+            with col_preview:
+                if image_bytes:
+                    st.image(image_bytes, caption="الصورة المسحوبة", use_container_width=True)
+                else:
+                    st.info("لم يتم العثور على صورة")
+            
+            with col_details:
+                st.markdown(f"**العنوان:** {meta.get('raw_title')}")
+                st.markdown(f"**الوصف:** {meta.get('raw_desc')[:200]}...")
+
+            # التحليل الذكي باستخدام الصورة المسحوبة
+            if image_bytes:
+                analyze_key = f"analyzed_url_{hash(image_bytes)}"
+                if analyze_key not in st.session_state:
+                    with st.spinner("🔍 جاري تحليل الصورة والبيانات بالذكاء الاصطناعي..."):
+                        try:
+                            # نستخدم دالة التحليل الموجودة للصورة
+                            info = analyze_perfume_image(image_bytes)
+                            
+                            # دمج البيانات المسحوبة (العنوان) مع تحليل الذكاء الاصطناعي لزيادة الدقة
+                            if meta.get('raw_title'):
+                                # محاولة استخراج اسم البراند والمنتج من العنوان ببساطة
+                                parts = meta['raw_title'].split('-')[0].split('|')[0].strip()
+                                info['product_name'] = parts  # تحديث الاسم من الموقع مباشرة
+                                
+                            st.session_state[analyze_key] = info
+                        except Exception as e:
+                            st.error(f"فشل التحليل: {e}")
+                            # بيانات احتياطية في حال الفشل
+                            st.session_state[analyze_key] = build_manual_info(
+                                meta.get('raw_title', 'Unknown'), "Brand", "EDP", "100ml", 
+                                "unisex", "luxury", [], "glass", "luxury", meta.get('raw_desc', '')
+                            )
+                
+                perfume_info = st.session_state.get(analyze_key, {})
+                _info_card(perfume_info)
+
+    # ---------------------- وضع الصورة (القديم) ----------------------
+    elif st.session_state.input_mode == "image":
         st.markdown('<div class="step-badge">② رفع صورة العطر</div>', unsafe_allow_html=True)
 
         col_img, col_char = st.columns([1, 1])
@@ -1128,7 +1214,6 @@ def show_studio_page():
 
         with col_char:
             st.markdown("**⚙️ إعدادات الجلسة**")
-
             # ── مرجع شخصية مهووس المدمج ──────────────────────────
             BUILTIN_REFS = {
                 "none":       ("بدون مرجع",        None),
@@ -1163,7 +1248,6 @@ def show_studio_page():
                     st.session_state.char_reference_bytes = None
             elif ref_choice != "none":
                 asset_path = BUILTIN_REFS[ref_choice][1]
-                # استخدام الدالة المحسنة مع الكاش
                 ref_bytes = get_cached_asset_bytes(asset_path)
                 if ref_bytes:
                     st.image(ref_bytes, caption=f"✅ {BUILTIN_REFS[ref_choice][0]}", use_container_width=True)
@@ -1215,7 +1299,8 @@ def show_studio_page():
             perfume_info["bottle_shape"] = st.text_area("شكل الزجاجة", perfume_info.get("bottle_shape", ""), height=60)
             perfume_info["notes_guess"]  = st.text_input("ملاحظات العطر المتوقعة", perfume_info.get("notes_guess", ""))
 
-    else:  # Manual mode
+    # ---------------------- الوضع اليدوي (القديم) ----------------------
+    else: 
         st.markdown('<div class="step-badge">② إدخال بيانات العطر</div>', unsafe_allow_html=True)
 
         c1, c2 = st.columns(2)
