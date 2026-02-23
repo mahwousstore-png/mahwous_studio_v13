@@ -858,7 +858,7 @@ def _show_single_image_tab(perfume_info: dict):
             prompt = build_product_only_prompt(perfume_info, img_aspect)
         elif img_type == "✨ ريمكس (تغيير الخلفية)":
             prompt = f"High quality photo of perfume bottle with new artistic background, same product"
-        elif img_type == "🌙 وضع رمضان":
+        elif img_type == "رمضاني":
             prompt = build_ramadan_product_prompt(perfume_info, img_aspect)
 
         if img_extra:

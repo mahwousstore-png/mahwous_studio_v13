@@ -269,7 +269,7 @@ def generate_image_gemini(prompt: str, aspect: str = "1:1") -> Optional[bytes]:
             "sampleCount": 1,
             "aspectRatio": ar,
             "safetyFilterLevel": "block_few",
-            "personGeneration": "allow_adult"
+            "personGeneration": "allow_all"
         }
     }
 
@@ -344,7 +344,6 @@ def _generate_image_fal_flux(prompt: str, aspect: str = "1:1") -> Optional[bytes
             "image_size": img_size,
             "num_inference_steps": 28,
             "num_images": 1,
-            "enable_safety_checker": False,
             "output_format": "jpeg"
         },
         timeout=120
@@ -781,9 +780,10 @@ def generate_video_luma(prompt: str, image_bytes: Optional[bytes] = None,
         "loop": loop,
     }
 
-    # FIX: إضافة resolution إذا كان duration محدداً
+    # FIX: Ray-2 يقبل فقط "5s" أو "9s" — نحوّل باقي القيم للأقرب
     if duration and duration > 0:
-        payload["duration"] = f"{duration}s"
+        luma_duration = "9s" if duration >= 7 else "5s"
+        payload["duration"] = luma_duration
 
     if image_bytes:
         img_url = _img_to_url_imgbb(image_bytes)
@@ -851,38 +851,47 @@ def poll_luma_video(generation_id: str, timeout: int = 300) -> dict:
 
 def generate_video_runway(prompt: str, image_bytes: Optional[bytes] = None,
                            aspect_ratio: str = "9:16", duration: int = 5) -> dict:
-    """توليد فيديو بـ RunwayML Gen-4 Turbo"""
+    """توليد فيديو بـ RunwayML Gen-3/4"""
     secrets = _get_secrets()
     api_key = secrets.get("runway")
     if not api_key:
         return {"error": "RUNWAY_API_KEY مفقود — أضفه في إعدادات API"}
 
-    # FIX: تصحيح ratio map وفق API version 2024-11-06
-    # القيم الصحيحة: "1280:720", "720:1280", "1104:832", "960:960", "832:1104", "1584:672"
+    # الرابط الصحيح الحالي (وليس api.dev)
+    BASE_URL = "https://api.runwayml.com/v1"
+
     ratio_map = {
         "9:16": "720:1280",
         "16:9": "1280:720",
         "1:1":  "960:960",
     }
     ratio = ratio_map.get(aspect_ratio, "720:1280")
-
-    # FIX: تصحيح payload structure وفق API الحالي
-    # model الصحيح: "gen4_turbo" (وليس "gen3a_turbo" الذي لا يزال مدعوماً لكن gen4_turbo أفضل)
-    payload: dict = {
-        "model": "gen4_turbo",
-        "promptText": prompt,
-        "ratio": ratio,
-        "duration": min(max(duration, 2), 10),  # يجب أن يكون بين 2 و 10
-    }
-
-    # FIX: promptImage يجب أن يكون data URI أو HTTPS URL
-    if image_bytes:
-        b64 = base64.b64encode(image_bytes).decode()
-        payload["promptImage"] = f"data:image/jpeg;base64,{b64}"
+    safe_duration = min(max(int(duration), 5), 10)
 
     try:
+        if image_bytes:
+            # image-to-video: gen4_turbo يتطلب صورة
+            b64 = base64.b64encode(image_bytes).decode()
+            payload: dict = {
+                "model": "gen4_turbo",
+                "promptText": prompt,
+                "promptImage": f"data:image/jpeg;base64,{b64}",
+                "ratio": ratio,
+                "duration": safe_duration,
+            }
+            endpoint = f"{BASE_URL}/image_to_video"
+        else:
+            # text-to-video: gen3a_turbo يعمل بدون صورة
+            payload = {
+                "model": "gen3a_turbo",
+                "promptText": prompt,
+                "ratio": ratio,
+                "duration": safe_duration,
+            }
+            endpoint = f"{BASE_URL}/text_to_video"
+
         resp = requests.post(
-            "https://api.dev.runwayml.com/v1/image_to_video",
+            endpoint,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -894,7 +903,7 @@ def generate_video_runway(prompt: str, image_bytes: Optional[bytes] = None,
         if resp.status_code in [200, 201]:
             data = resp.json()
             return {"id": data.get("id", ""), "state": "pending", "provider": "runway"}
-        return {"error": f"RunwayML API error {resp.status_code}: {resp.text[:200]}"}
+        return {"error": f"RunwayML API error {resp.status_code}: {resp.text[:300]}"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -907,7 +916,7 @@ def check_runway_status(generation_id: str) -> dict:
         return {"state": "error", "error": "مفتاح أو معرف مفقود"}
     try:
         resp = requests.get(
-            f"https://api.dev.runwayml.com/v1/tasks/{generation_id}",
+            f"https://api.runwayml.com/v1/tasks/{generation_id}",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "X-Runway-Version": "2024-11-06"
