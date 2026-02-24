@@ -68,17 +68,35 @@ def _get_secrets() -> dict:
             return os.environ.get(env_key, "")
         return ""
 
+    def _get_any(*keys_and_sessions) -> str:
+        """يجرب أسماء مفاتيح متعددة للتوافق مع الإصدارات القديمة"""
+        for toml_key, session_key in keys_and_sessions:
+            val = st.session_state.get(session_key, "")
+            if val:
+                return val
+            try:
+                v = st.secrets.get(toml_key, "")
+                if v:
+                    return v
+            except Exception:
+                pass
+            v = os.environ.get(toml_key, "")
+            if v:
+                return v
+        return ""
+
     return {
-        "gemini":     _get("GEMINI_API_KEY",      "gemini_key",      "GEMINI_API_KEY"),
-        "openrouter": _get("OPENROUTER_API_KEY",   "openrouter_key",  "OPENROUTER_API_KEY"),
-        "luma":       _get("LUMA_API_KEY",         "luma_key",        "LUMA_API_KEY"),
-        "runway":     _get("RUNWAY_API_KEY",        "runway_key",      "RUNWAY_API_KEY"),
-        "fal":        _get("FAL_API_KEY",           "fal_key",         "FAL_API_KEY"),
-        "imgbb":      _get("IMGBB_API_KEY",         "imgbb_key",       "IMGBB_API_KEY"),
-        "elevenlabs": _get("ELEVENLABS_API_KEY",    "elevenlabs_key",  "ELEVENLABS_API_KEY"),
-        "webhook":    _get("MAKE_WEBHOOK_URL",      "webhook_url",     "MAKE_WEBHOOK_URL"),
-        "supabase_url": _get("SUPABASE_URL",        "supabase_url",    "SUPABASE_URL"),
-        "supabase_key": _get("SUPABASE_KEY",        "supabase_key",    "SUPABASE_KEY"),
+        # يدعم أسماء المفاتيح الجديدة والقديمة معاً
+        "gemini":       _get_any(("GEMINI_API_KEY","gemini_key"), ("GOOGLE_KEY","google_key"), ("GOOGLE_API_KEY","google_key")),
+        "openrouter":   _get_any(("OPENROUTER_API_KEY","openrouter_key"), ("OPENROUTER_KEY","openrouter_key")),
+        "luma":         _get_any(("LUMA_API_KEY","luma_key"), ("LUMA_KEY","luma_key")),
+        "runway":       _get_any(("RUNWAY_API_KEY","runway_key"), ("RUNWAY_KEY","runway_key")),
+        "fal":          _get_any(("FAL_API_KEY","fal_key"), ("FAL_KEY","fal_key")),
+        "imgbb":        _get_any(("IMGBB_API_KEY","imgbb_key"), ("IMGBB_KEY","imgbb_key")),
+        "elevenlabs":   _get_any(("ELEVENLABS_API_KEY","elevenlabs_key"), ("ELEVENLABS_KEY","elevenlabs_key")),
+        "webhook":      _get_any(("MAKE_WEBHOOK_URL","webhook_url"), ("WEBHOOK_URL","webhook_url")),
+        "supabase_url": _get_any(("SUPABASE_URL","supabase_url"),),
+        "supabase_key": _get_any(("SUPABASE_KEY","supabase_key"),),
     }
 
 
@@ -171,7 +189,6 @@ def analyze_perfume_image(image_bytes: bytes) -> dict:
         "gemini-2.0-flash-lite",
         "gemini-2.0-flash",
         "gemini-1.5-flash-8b",
-        "gemini-1.5-flash-latest",
     ]
 
     last_error = None
@@ -546,7 +563,6 @@ def _call_gemini_text(prompt: str, max_tokens: int = 2000) -> str:
         "gemini-2.0-flash-lite",
         "gemini-2.0-flash",
         "gemini-1.5-flash-8b",
-        "gemini-1.5-flash-latest",
     ]
     last_error = None
     for model in models_to_try:

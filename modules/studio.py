@@ -536,8 +536,8 @@ def _show_video_generation_tab(perfume_info: dict):
     with vc2:
         video_duration = st.select_slider(
             "⏱️ مدة الفيديو",
-            options=[5, 9, 10],  # Luma: 5s or 9s; Kling: 5s or 10s
-            value=7,
+            options=[5, 9, 10],
+            value=5,
             key="video_duration"
         )
 
@@ -627,7 +627,7 @@ def _show_video_generation_tab(perfume_info: dict):
         scene=video_scene,
         outfit=video_outfit,
         camera=st.session_state.get("video_camera", "orbit"),
-        duration=st.session_state.get("video_duration", 7),
+        duration=st.session_state.get("video_duration", 5),
         aspect=st.session_state.get("video_aspect", "9:16"),
         extra=st.session_state.get("video_extra", ""),
     )
