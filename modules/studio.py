@@ -127,7 +127,10 @@ def generate_trend_insights(info: dict) -> dict:
 def analyze_perfume_url(url: str) -> dict:
     """استخراج معلومات العطر من رابط المنتج — يستخدم Claude أو Gemini تلقائياً"""
     import requests, json
-    from bs4 import BeautifulSoup
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return {"error": "BeautifulSoup غير مثبت — قراءة URL غير متاحة"}
     from modules.ai_engine import _call_claude
     if not url or not url.startswith("http"):
         return {"success": False, "error": "رابط غير صالح"}
@@ -160,7 +163,10 @@ def analyze_perfume_url(url: str) -> dict:
         # فشل AI — إرجاع بيانات أساسية من عنوان الصفحة
         try:
             import requests as _r
-            from bs4 import BeautifulSoup as _BS
+            try:
+                from bs4 import BeautifulSoup as _BS
+            except ImportError:
+                _BS = None
             _resp = _r.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
             _soup = _BS(_resp.text, "html.parser")
             _title = _soup.find("title")
@@ -177,26 +183,29 @@ def analyze_perfume_url(url: str) -> dict:
 def upscale_image_fal(image_bytes: bytes) -> dict:
     """رفع دقة الصورة باستخدام Fal.ai"""
     try:
-        import fal_client, base64
-        secrets = _get_secrets()
-        if not secrets.get("fal"):
+        import requests as _rq, base64 as _b64
+        from modules.ai_engine import _get_secrets as _gs
+        secrets = _gs()
+        api_key = secrets.get("fal", "")
+        if not api_key:
             return {"success": False, "error": "FAL_API_KEY مفقود"}
-        import os
-        os.environ["FAL_KEY"] = secrets["fal"]
-        b64 = base64.b64encode(image_bytes).decode()
+        b64 = _b64.b64encode(image_bytes).decode()
         data_uri = f"data:image/jpeg;base64,{b64}"
-        result = fal_client.run(
-            "fal-ai/ccsr",
-            arguments={"image_url": data_uri, "scale": 2}
+        resp = _rq.post(
+            "https://fal.run/fal-ai/ccsr",
+            headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
+            json={"image_url": data_uri, "scale": 2},
+            timeout=120
         )
+        resp.raise_for_status()
+        result = resp.json()
         img_url = result.get("image", {}).get("url") or result.get("url", "")
         if img_url:
-            import requests
-            img_resp = requests.get(img_url, timeout=30)
+            img_resp = _rq.get(img_url, timeout=30)
             return {"success": True, "bytes": img_resp.content, "url": img_url}
         return {"success": False, "error": "لم يتم إرجاع صورة"}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e)[:200]}
 
 # ─── Studio CSS ────────────────────────────────────────────────────────────────
 STUDIO_CSS = """
